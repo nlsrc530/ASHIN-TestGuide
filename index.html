@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>아신수학전문학원 온라인 테스트</title>
+<title>아신수학전문학원 TestGuide</title>
 <style>
 :root{--bg:#0f172a;--card:#fff;--ink:#1e293b;--muted:#64748b;--brand:#4f46e5;--brand2:#6366f1;--ok:#16a34a;--bad:#dc2626;--line:#e2e8f0;--soft:#f1f5f9;--warn:#f59e0b}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -139,7 +139,7 @@ thead tr{background:var(--soft)}
 <div class="wrap">
   <div class="brandbar">
     <div class="logo">📚</div>
-    <div><h1>아신수학전문학원 온라인 테스트</h1><p>학원생 전용 평가 시스템</p></div>
+    <div><h1>아신수학전문학원 TestGuide</h1><p>학원생 전용 평가 시스템</p></div>
   </div>
   <div id="app"></div>
   <div id="cropRoot"></div>
@@ -175,7 +175,7 @@ const SEED=[
 ];
 
 function loadTests(){try{const d=JSON.parse(localStorage.getItem(LS_TESTS));return d&&d.length?d:SEED;}catch(e){return SEED;}}
-function saveTests(t){localStorage.setItem(LS_TESTS,JSON.stringify(t));}
+function saveTests(t){localStorage.setItem(LS_TESTS,JSON.stringify(t));cloudSaveTests(t);}
 function loadResults(){try{return JSON.parse(localStorage.getItem(LS_RESULTS))||[];}catch(e){return[];}}
 function saveResults(r){localStorage.setItem(LS_RESULTS,JSON.stringify(r));}
 const LS_STUDENTS='acad_students_v2';
@@ -201,7 +201,7 @@ function usageKey(s){return (s?s.sid:'')+'|'+(s?s.name:'');}
 function getUsageStore(){try{return JSON.parse(localStorage.getItem(LS_USAGE))||{};}catch(e){return{};}}
 function usageEntry(key){const raw=getUsageStore()[key];if(raw==null)return{sec:0,log:[],first:'',last:''};if(typeof raw==='number')return{sec:raw,log:[],first:'',last:''};return{sec:raw.sec||0,log:Array.isArray(raw.log)?raw.log:[],first:raw.first||'',last:raw.last||''};}
 function storedUsage(s){return usageEntry(usageKey(s)).sec;}
-function commitUsage(){if(!student||!loginTime)return;const sec=sessionElapsed();if(sec<=0){loginTime=Date.now();return;}const m=getUsageStore();const e=usageEntry(usageKey(student));const now=new Date().toLocaleString('ko-KR');e.sec+=sec;e.log.push({d:now,sec});if(e.log.length>300)e.log=e.log.slice(-300);if(!e.first)e.first=now;e.last=now;m[usageKey(student)]=e;localStorage.setItem(LS_USAGE,JSON.stringify(m));loginTime=Date.now();}
+function commitUsage(){if(!student||!loginTime)return;const sec=sessionElapsed();if(sec<=0){loginTime=Date.now();return;}const m=getUsageStore();const e=usageEntry(usageKey(student));const now=new Date().toLocaleString('ko-KR');e.sec+=sec;e.log.push({d:now,sec});if(e.log.length>300)e.log=e.log.slice(-300);if(!e.first)e.first=now;e.last=now;m[usageKey(student)]=e;localStorage.setItem(LS_USAGE,JSON.stringify(m));cloudSaveUsage(usageKey(student),e);loginTime=Date.now();}
 function cumulativeUsage(s){return storedUsage(s)+(s&&student&&usageKey(s)===usageKey(student)?sessionElapsed():0);}
 function adminStudents(){const all=loadResults();const map={};all.forEach(r=>{const k=(r.sid||'-')+'|'+(r.student||'');(map[k]=map[k]||{key:k,name:r.student||'',sid:r.sid||'-',rs:[]}).rs.push(r);});const store=getUsageStore();Object.keys(store).forEach(k=>{if(!map[k]){const p=k.split('|');map[k]={key:k,name:p[1]||'',sid:p[0]||'-',rs:[]};}});return Object.keys(map).sort().map(k=>map[k]);}
 function sessionElapsed(){return loginTime?Math.floor((Date.now()-loginTime)/1000):0;}
@@ -209,6 +209,23 @@ function fmtDur(sec){const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=se
 function hashPw(s){let h=5381;for(let i=0;i<s.length;i++){h=(((h<<5)+h)+s.charCodeAt(i))&0xffffffff;}return String(h>>>0);}
 function getPw(){return localStorage.getItem(LS_ADMINPW);}
 function setPw(p){localStorage.setItem(LS_ADMINPW,hashPw(p));}
+
+/* ============ CLOUD SYNC (Firebase Firestore) ============ */
+let CLOUD=null, cloudOn=false, curView='login';
+function sanId(s){let x=encodeURIComponent(String(s));x=x.replace(/[.#$\[\]\/*]/g,'_');return x||'_';}
+function newRid(){return 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
+function cloudSaveTests(list){if(!cloudOn)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'config','tests'),{data:list}).catch(function(){});}catch(e){}}
+function cloudSaveStudent(s){if(!cloudOn||!s||!s.sid)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'students',sanId(s.sid)),{sid:s.sid,name:s.name||'',pw:s.pw||''}).catch(function(){});}catch(e){}}
+function cloudDelStudent(sid){if(!cloudOn)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'students',sanId(sid))).catch(function(){});}catch(e){}}
+function cloudSaveResult(r){if(!cloudOn||!r||!r.rid)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'results',r.rid),r).catch(function(){});}catch(e){}}
+function cloudDelResult(rid){if(!cloudOn||!rid)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'results',rid)).catch(function(){});}catch(e){}}
+function cloudSaveUsage(key,entry){if(!cloudOn)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'usage',sanId(key)),{key:key,entry:entry}).catch(function(){});}catch(e){}}
+function cloudDelUsage(key){if(!cloudOn)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'usage',sanId(key))).catch(function(){});}catch(e){}}
+function refreshView(){try{if(curView==='login')viewLogin();else if(curView==='home'){if(student)viewHome();}else if(curView==='results'){if(student)viewMyResults();}else if(curView==='admin'){if(adminAuthed)renderAdmin();}}catch(e){}}
+function applyTestsSnap(list){localStorage.setItem(LS_TESTS,JSON.stringify(list&&list.length?list:SEED));tests=loadTests();refreshView();}
+function applyStudentsSnap(map){localStorage.setItem(LS_STUDENTS,JSON.stringify(map));refreshView();}
+function applyResultsSnap(arr){localStorage.setItem(LS_RESULTS,JSON.stringify(arr));refreshView();}
+function applyUsageSnap(map){localStorage.setItem(LS_USAGE,JSON.stringify(map));refreshView();}
 
 function getParam(k){
   const h=(location.hash||'').replace(/^#/,'');
@@ -223,6 +240,7 @@ function buildLink(tid){
 
 /* ============ ENTRY / LOGIN ============ */
 function viewLogin(){
+  curView='login';
   stopTimer();
   const t=entryTestId?loadTests().find(x=>x.id===entryTestId):null;
   const banner=t?`<div class="banner">🏫 학원 카페 링크로 입장했어요<br><b>“${esc(t.title)}”</b> 시험 (${t.questions.length}문항 · ${t.minutes}분)</div>`:'';
@@ -247,7 +265,7 @@ window.doLogin=function(){
   if(!rec||rec.name!==n){alert('등록되지 않은 수강생입니다.\n관리자에게 등록을 요청하세요. (이름과 학생 번호가 등록된 값과 정확히 일치해야 합니다.)');return;}
   if(!rec.pw){
     if(!p||p.length<4){alert('첫 로그인입니다. 앞으로 사용할 개인 암호를 4자 이상으로 입력하세요.');return;}
-    const m=getStudents();m[i].pw=hashPw(p);saveStudents(m);
+    const m=getStudents();m[i].pw=hashPw(p);saveStudents(m);cloudSaveStudent(m[i]);
     alert('개인 암호가 설정되었습니다. 앞으로는 이 암호로 로그인하세요.');
   }else{
     if(hashPw(p)!==rec.pw){alert('개인 암호가 올바르지 않습니다.');return;}
@@ -264,6 +282,7 @@ window.logout=function(){
 
 /* ============ HOME ============ */
 function viewHome(){
+  curView='home';
   stopTimer(); tests=loadTests();
   const done=loadResults();
   const isDone=tid=>done.some(r=>r.testId===tid&&r.sid===student.id&&r.student===student.name);
@@ -283,6 +302,7 @@ function viewHome(){
 
 /* ============ TEST TAKING ============ */
 window.startTest=function(tid){
+  curView='test';
   tests=loadTests();
   curTest=tests.find(t=>t.id===tid);
   if(!curTest){alert('시험을 찾을 수 없습니다.');return;}
@@ -411,9 +431,9 @@ window.submitTest=function(){
   qs.forEach((q,i)=>{if(isCorrect(q,answers[i]))correct++;});
   const un=qs.filter((q,i)=>unanswered(q,answers[i])).length;
   const score=Math.round(correct/qs.length*100);
-  const result={testId:curTest.id,testTitle:curTest.title,student:student.name,sid:student.id,
+  const result={rid:newRid(),testId:curTest.id,testTitle:curTest.title,student:student.name,sid:student.id,
     date:new Date().toLocaleString('ko-KR'),score,correct,total:qs.length,un,answers:answers.slice(),timeUsed:curTest.minutes*60-timeLeft};
-  const results=loadResults(); results.push(result); saveResults(results);
+  const results=loadResults(); results.push(result); saveResults(results); cloudSaveResult(result);
   renderResult(result,results.length-1);
 };
 function renderResult(r,idx){
@@ -496,6 +516,7 @@ window.viewReview=function(tid,idx){
 
 /* ============ MY RESULTS + AVERAGES ============ */
 window.viewMyResults=function(){
+  curView='results';
   stopTimer();
   const all=loadResults();
   const mine=all.filter(r=>r.sid===student.id&&r.student===student.name);
@@ -587,6 +608,7 @@ window.changePw=function(){
   setPw(np);alert('암호가 변경되었습니다.');
 };
 function renderAdmin(){
+  curView='admin';
   if(adminTab==='edit'){renderEdit();return;}
   tests=loadTests();
   let body='';
@@ -662,10 +684,10 @@ function renderAdmin(){
 }
 window.renderAdmin=renderAdmin;
 window.backToStudent=function(){entryTestId=null;adminAuthed=false;viewLogin();};
-window.addStudent=function(){const n=document.getElementById('newnm').value.trim(),i=document.getElementById('newsid').value.trim();if(!n||!i){alert('이름과 학생 번호를 모두 입력하세요.');return;}const m=getStudents();if(m[i]){alert('이미 등록된 학생 번호입니다.');return;}m[i]={sid:i,name:n,pw:''};saveStudents(m);renderAdmin();};
-window.delStudent=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;if(!confirm('이 수강생을 삭제할까요? 기존 성적 기록은 유지됩니다.'))return;const m=getStudents();delete m[sid];saveStudents(m);renderAdmin();};
-window.resetStuPw=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;if(!confirm('암호를 초기화하면 학생이 다음 로그인 시 새 개인 암호를 다시 설정합니다. 진행할까요?'))return;const m=getStudents();m[sid].pw='';saveStudents(m);alert('암호가 초기화되었습니다.');renderAdmin();};
-window.setStuPw=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;const p=prompt('지정할 개인 암호를 입력하세요 (4자 이상):');if(p==null)return;if(p.length<4){alert('암호는 4자 이상이어야 합니다.');return;}const m=getStudents();m[sid].pw=hashPw(p);saveStudents(m);alert('암호가 지정되었습니다.');renderAdmin();};
+window.addStudent=function(){const n=document.getElementById('newnm').value.trim(),i=document.getElementById('newsid').value.trim();if(!n||!i){alert('이름과 학생 번호를 모두 입력하세요.');return;}const m=getStudents();if(m[i]){alert('이미 등록된 학생 번호입니다.');return;}m[i]={sid:i,name:n,pw:''};saveStudents(m);cloudSaveStudent(m[i]);renderAdmin();};
+window.delStudent=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;if(!confirm('이 수강생을 삭제할까요? 기존 성적 기록은 유지됩니다.'))return;const m=getStudents();delete m[sid];saveStudents(m);cloudDelStudent(sid);renderAdmin();};
+window.resetStuPw=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;if(!confirm('암호를 초기화하면 학생이 다음 로그인 시 새 개인 암호를 다시 설정합니다. 진행할까요?'))return;const m=getStudents();m[sid].pw='';saveStudents(m);cloudSaveStudent(m[sid]);alert('암호가 초기화되었습니다.');renderAdmin();};
+window.setStuPw=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;const p=prompt('지정할 개인 암호를 입력하세요 (4자 이상):');if(p==null)return;if(p.length<4){alert('암호는 4자 이상이어야 합니다.');return;}const m=getStudents();m[sid].pw=hashPw(p);saveStudents(m);cloudSaveStudent(m[sid]);alert('암호가 지정되었습니다.');renderAdmin();};
 window.toggleAllStu=function(cb){document.querySelectorAll('.stusel').forEach(b=>b.checked=cb.checked);};
 window.showSelectedReport=function(){
   const boxes=Array.from(document.querySelectorAll('.stusel:checked'));
@@ -680,27 +702,27 @@ window.delResult=function(oi){
   const rec=results.splice(oi,1)[0];
   rec._del=new Date().toLocaleString('ko-KR');
   const t=getTrash();t.push(rec);saveTrash(t);
-  saveResults(results);renderAdmin();
+  saveResults(results);cloudDelResult(rec.rid);renderAdmin();
 };
 window.clearAllResults=function(){
   const results=loadResults();
   if(!results.length){alert('삭제할 기록이 없습니다.');return;}
   if(!confirm('전체 응시 기록 '+results.length+'건을 모두 삭제할까요? 휴지통으로 이동하며 복구할 수 있습니다.'))return;
   const t=getTrash();const now=new Date().toLocaleString('ko-KR');
-  results.forEach(r=>{r._del=now;t.push(r);});
+  results.forEach(r=>{r._del=now;t.push(r);cloudDelResult(r.rid);});
   saveTrash(t);saveResults([]);renderAdmin();
 };
 window.restoreResult=function(oi){
   const t=getTrash();
   if(oi<0||oi>=t.length)return;
-  const rec=t.splice(oi,1)[0];delete rec._del;
-  const results=loadResults();results.push(rec);saveResults(results);
+  const rec=t.splice(oi,1)[0];delete rec._del;if(!rec.rid)rec.rid=newRid();
+  const results=loadResults();results.push(rec);saveResults(results);cloudSaveResult(rec);
   saveTrash(t);renderAdmin();
 };
 window.restoreAll=function(){
   const t=getTrash();if(!t.length){alert('복구할 기록이 없습니다.');return;}
   const results=loadResults();
-  t.forEach(r=>{delete r._del;results.push(r);});
+  t.forEach(r=>{delete r._del;if(!r.rid)r.rid=newRid();results.push(r);cloudSaveResult(r);});
   saveResults(results);saveTrash([]);renderAdmin();
 };
 window.purgeResult=function(oi){
@@ -717,9 +739,9 @@ window.delStudentData=function(idx){
   const studs=adminStudents();const s=studs[idx];if(!s)return;
   if(!confirm(s.name+' 학생의 성적·이용시간 기록을 삭제할까요? 학생 휴지통에서 복구할 수 있습니다.'))return;
   const results=loadResults();const keep=[],removed=[];
-  results.forEach(r=>{if(((r.sid||'-')+'|'+(r.student||''))===s.key)removed.push(r);else keep.push(r);});
+  results.forEach(r=>{if(((r.sid||'-')+'|'+(r.student||''))===s.key){removed.push(r);cloudDelResult(r.rid);}else keep.push(r);});
   const store=getUsageStore();const usage=store[s.key]!=null?store[s.key]:null;
-  delete store[s.key];localStorage.setItem(LS_USAGE,JSON.stringify(store));
+  delete store[s.key];localStorage.setItem(LS_USAGE,JSON.stringify(store));cloudDelUsage(s.key);
   saveResults(keep);
   const tr=getStuTrash();tr.push({key:s.key,name:s.name,sid:s.sid,results:removed,usage:usage,_del:new Date().toLocaleString('ko-KR')});saveStuTrash(tr);
   if(student&&usageKey(student)===s.key)loginTime=Date.now();
@@ -728,14 +750,14 @@ window.delStudentData=function(idx){
 window.restoreStudentData=function(oi){
   const tr=getStuTrash();if(oi<0||oi>=tr.length)return;
   const b=tr.splice(oi,1)[0];
-  const results=loadResults();(b.results||[]).forEach(r=>results.push(r));saveResults(results);
-  if(b.usage!=null){const store=getUsageStore();store[b.key]=b.usage;localStorage.setItem(LS_USAGE,JSON.stringify(store));}
+  const results=loadResults();(b.results||[]).forEach(r=>{if(!r.rid)r.rid=newRid();results.push(r);cloudSaveResult(r);});saveResults(results);
+  if(b.usage!=null){const store=getUsageStore();store[b.key]=b.usage;localStorage.setItem(LS_USAGE,JSON.stringify(store));cloudSaveUsage(b.key,b.usage);}
   saveStuTrash(tr);renderAdmin();
 };
 window.restoreAllStudentData=function(){
   const tr=getStuTrash();if(!tr.length){alert('복구할 기록이 없습니다.');return;}
   const results=loadResults();const store=getUsageStore();
-  tr.forEach(b=>{(b.results||[]).forEach(r=>results.push(r));if(b.usage!=null)store[b.key]=b.usage;});
+  tr.forEach(b=>{(b.results||[]).forEach(r=>{if(!r.rid)r.rid=newRid();results.push(r);cloudSaveResult(r);});if(b.usage!=null){store[b.key]=b.usage;cloudSaveUsage(b.key,b.usage);}});
   saveResults(results);localStorage.setItem(LS_USAGE,JSON.stringify(store));
   saveStuTrash([]);renderAdmin();
 };
@@ -1015,7 +1037,8 @@ window.showInfographic=function(scope,arg){
 };
 
 /* ============ INIT ============ */
-(function init(){
+window.__bootApp=function(){
+  if(window.__booted)return; window.__booted=true;
   const tid=getParam('test');
   if(tid&&loadTests().find(t=>t.id===tid)){entryTestId=tid;}
   setInterval(()=>{const e=document.getElementById('sessClock');if(e&&loginTime)e.textContent=fmtDur(sessionElapsed());const c=document.getElementById('cumClock');if(c&&student)c.textContent=fmtDur(cumulativeUsage(student));},1000);
@@ -1025,8 +1048,59 @@ window.showInfographic=function(scope,arg){
     if(t&&loadTests().find(x=>x.id===t)&&!student){entryTestId=t;viewLogin();}
   });
   viewLogin();
-})();
+};
 
+window.__cloudReady=async function(fs){
+  CLOUD=fs; cloudOn=true;
+  const {db,doc,setDoc,deleteDoc,collection,onSnapshot,getDocs,getDoc}=fs;
+  try{
+    const tSnap=await getDoc(doc(db,'config','tests'));
+    if(tSnap.exists()&&tSnap.data().data){localStorage.setItem(LS_TESTS,JSON.stringify(tSnap.data().data));}
+    else{cloudSaveTests(loadTests());}
+    const sSnap=await getDocs(collection(db,'students'));
+    if(!sSnap.empty){const m={};sSnap.forEach(d=>{const v=d.data();if(v.sid)m[v.sid]=v;});localStorage.setItem(LS_STUDENTS,JSON.stringify(m));}
+    else{const loc=getStudents();Object.keys(loc).forEach(k=>cloudSaveStudent(loc[k]));}
+    const rSnap=await getDocs(collection(db,'results'));
+    if(!rSnap.empty){const arr=[];rSnap.forEach(d=>arr.push(d.data()));arr.sort((a,b)=>(a.date||'').localeCompare(b.date||''));localStorage.setItem(LS_RESULTS,JSON.stringify(arr));}
+    else{const loc=loadResults();loc.forEach(r=>{if(!r.rid)r.rid=newRid();cloudSaveResult(r);});saveResults(loc);}
+    const uSnap=await getDocs(collection(db,'usage'));
+    if(!uSnap.empty){const m={};uSnap.forEach(d=>{const v=d.data();if(v.key)m[v.key]=v.entry;});localStorage.setItem(LS_USAGE,JSON.stringify(m));}
+    else{const loc=getUsageStore();Object.keys(loc).forEach(k=>cloudSaveUsage(k,loc[k]));}
+  }catch(e){console.warn('cloud init',e);cloudOn=false;}
+  try{
+    onSnapshot(doc(db,'config','tests'),d=>{if(d.exists()&&d.data().data)applyTestsSnap(d.data().data);});
+    onSnapshot(collection(db,'students'),qs=>{const m={};qs.forEach(d=>{const v=d.data();if(v.sid)m[v.sid]=v;});applyStudentsSnap(m);});
+    onSnapshot(collection(db,'results'),qs=>{const arr=[];qs.forEach(d=>arr.push(d.data()));arr.sort((a,b)=>(a.date||'').localeCompare(b.date||''));applyResultsSnap(arr);});
+    onSnapshot(collection(db,'usage'),qs=>{const m={};qs.forEach(d=>{const v=d.data();if(v.key)m[v.key]=v.entry;});applyUsageSnap(m);});
+  }catch(e){console.warn('cloud listen',e);}
+  window.__bootApp();
+};
+
+setTimeout(()=>{if(!window.__booted)window.__bootApp();},5000);
+
+</script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot, getDocs, getDoc }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const firebaseConfig={
+  apiKey:"AIzaSyDwQ2Xclo56rmNQ1PJLcY_VkRGr2RLjyYM",
+  authDomain:"testguide-m.firebaseapp.com",
+  projectId:"testguide-m",
+  storageBucket:"testguide-m.appspot.com",
+  messagingSenderId:"770438000299",
+  appId:"1:770438000299:web:073db36db0e9e1fcbc11ee"
+};
+try{
+  const app=initializeApp(firebaseConfig);
+  try{ await signInAnonymously(getAuth(app)); }catch(authErr){ console.warn('익명 로그인 실패', authErr); }
+  const db=getFirestore(app);
+  await window.__cloudReady({db,doc,setDoc,deleteDoc,collection,onSnapshot,getDocs,getDoc});
+}catch(e){
+  console.error('Firebase 연결 실패 — 로컬 모드로 실행합니다.',e);
+  if(window.__bootApp)window.__bootApp();
+}
 </script>
 </body>
 </html>
