@@ -198,6 +198,8 @@ function saveLectures(l){localStorage.setItem(LS_LECTURES,JSON.stringify(l));clo
 function loadResults(){try{return JSON.parse(localStorage.getItem(LS_RESULTS))||[];}catch(e){return[];}}
 function saveResults(r){localStorage.setItem(LS_RESULTS,JSON.stringify(r));}
 const LS_STUDENTS='acad_students_v2';
+const GRADES=['초5','초6','중1','중2','중3','고1','고2','고3'];
+function gradeOptions(sel){return '<option value="">'+(sel?'':'학년 선택')+'</option>'+GRADES.map(function(g){return '<option value="'+g+'"'+(sel===g?' selected':'')+'>'+g+'</option>';}).join('');}
 function getStudents(){try{return JSON.parse(localStorage.getItem(LS_STUDENTS))||{};}catch(e){return{};}}
 function saveStudents(m){localStorage.setItem(LS_STUDENTS,JSON.stringify(m));}
 function findStudent(sid){return getStudents()[sid]||null;}
@@ -240,7 +242,7 @@ function cloudSaveTests(list){if(!cloudOn)return;try{(list||[]).forEach(function
 function cloudSaveTest(t){if(!cloudOn||!t||!t.id)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'tests',sanId(t.id)),t).catch(function(){});}catch(e){}}
 function cloudDelTest(id){if(!cloudOn||!id)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'tests',sanId(id))).catch(function(){});}catch(e){}}
 function cloudSaveLectures(list){if(!cloudOn)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'config','lectures'),{data:list}).catch(function(){});}catch(e){}}
-function cloudSaveStudent(s){if(!cloudOn||!s||!s.sid)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'students',sanId(s.sid)),{sid:s.sid,name:s.name||'',pw:s.pw||''}).catch(function(){});}catch(e){}}
+function cloudSaveStudent(s){if(!cloudOn||!s||!s.sid)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'students',sanId(s.sid)),{sid:s.sid,name:s.name||'',pw:s.pw||'',grade:s.grade||''}).catch(function(){});}catch(e){}}
 function cloudDelStudent(sid){if(!cloudOn)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'students',sanId(sid))).catch(function(){});}catch(e){}}
 function cloudSaveResult(r){if(!cloudOn||!r||!r.rid)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'results',r.rid),r).catch(function(){});}catch(e){}}
 function cloudDelResult(rid){if(!cloudOn||!rid)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'results',rid)).catch(function(){});}catch(e){}}
@@ -296,7 +298,7 @@ window.doLogin=function(){
   }else{
     if(hashPw(p)!==rec.pw){alert('개인 암호가 올바르지 않습니다.');return;}
   }
-  student={name:n,id:i,sid:i};
+  student={name:n,id:i,sid:i,grade:(rec.grade||'')};
   loginTime=Date.now();
   if(entryTestId){const t=loadTests().find(x=>x.id===entryTestId);if(t){startTest(entryTestId);return;}}
   viewHome();
@@ -329,16 +331,19 @@ window.viewTests=function(){
   stopTimer(); tests=loadTests();
   const done=loadResults();
   const isDone=tid=>done.some(r=>r.testId===tid&&r.sid===student.id&&r.student===student.name);
-  const list=tests.map(t=>{const d=isDone(t.id);return `<div class="testitem" onclick="startTest('${t.id}')">
+  const myGrade=student&&student.grade;
+  const shown=myGrade?tests.filter(t=>!t.grade||t.grade===myGrade):tests;
+  const list=shown.map(t=>{const d=isDone(t.id);return `<div class="testitem" onclick="startTest('${t.id}')">
     <div><h3>${esc(t.title)}</h3><div class="meta">${t.questions.length}문항 · 제한시간 ${fmtTestTime(t)} · <span style="color:var(--brand);font-weight:600">${modeLabel(t.mode||'learning')}</span>${d?' · <span style="color:var(--ok);font-weight:700">✔ 응시 완료(문제 확인만 가능)</span>':''}</div></div>
     <span class="pill blue">${esc(t.subject)}</span></div>`;}).join('');
+  const gradeTag=myGrade?`<span class="pill blue">${esc(myGrade)}</span>`:'';
   el.innerHTML=`<div class="card">
     <div class="row between">
-      <div><h2>📝 TestGuide 평가</h2>
-      <p class="sub" style="margin:4px 0 0">응시할 시험을 선택하세요.</p></div>
+      <div><h2>📝 TestGuide 평가 ${gradeTag}</h2>
+      <p class="sub" style="margin:4px 0 0">${myGrade?esc(myGrade)+' 응시 가능한 시험을 선택하세요.':'응시할 시험을 선택하세요.'}</p></div>
       <button class="btn ghost sm" onclick="viewHome()">🏠 메뉴</button>
     </div>
-    <div class="testlist">${list||'<div class="empty">등록된 시험이 없습니다.</div>'}</div>
+    <div class="testlist">${list||'<div class="empty">'+(myGrade?esc(myGrade)+'에 등록된 시험이 아직 없습니다.':'등록된 시험이 없습니다.')+'</div>'}</div>
     <div class="row" style="margin-top:18px"><button class="btn ghost sm" onclick="viewMyResults()">📊 내 성적 · 평균 보기</button></div>
   </div>`;
 };
@@ -346,6 +351,9 @@ window.viewLectures=function(g,sem){
   curView='lectures';
   stopTimer();
   const all=loadLectures();
+  const myGrade=student&&student.grade;
+  const locked=!!myGrade;
+  if(g===undefined&&myGrade)g=myGrade;
   const grades=[...new Set(all.map(x=>x.grade).filter(Boolean))].sort();
   let body;
   if(!all.length){
@@ -354,7 +362,8 @@ window.viewLectures=function(g,sem){
     body='<div class="banner">학년을 선택하세요.</div><div class="testlist">'+grades.map(x=>`<div class="testitem" onclick="viewLectures('${esc(x)}')"><div><h3>${esc(x)}</h3></div><span class="pill blue">학기 보기 →</span></div>`).join('')+'</div>';
   }else if(!sem){
     const sems=[...new Set(all.filter(x=>x.grade===g).map(x=>x.semester).filter(Boolean))].sort();
-    body=`<div class="banner">${esc(g)} — 학기를 선택하세요.</div><div class="row" style="margin-bottom:10px"><button class="btn ghost sm" onclick="viewLectures()">← 학년 다시 선택</button></div><div class="testlist">`+sems.map(x=>`<div class="testitem" onclick="viewLectures('${esc(g)}','${esc(x)}')"><div><h3>${esc(x)}</h3></div><span class="pill blue">과목 보기 →</span></div>`).join('')+'</div>';
+    const backBtn=locked?'<button class="btn ghost sm" onclick="viewHome()">🏠 메뉴</button>':'<button class="btn ghost sm" onclick="viewLectures()">← 학년 다시 선택</button>';
+    body=`<div class="banner">${esc(g)} — 학기를 선택하세요.</div><div class="row" style="margin-bottom:10px">${backBtn}</div><div class="testlist">`+(sems.length?sems.map(x=>`<div class="testitem" onclick="viewLectures('${esc(g)}','${esc(x)}')"><div><h3>${esc(x)}</h3></div><span class="pill blue">과목 보기 →</span></div>`).join(''):'<div class="empty">'+esc(g)+'에 등록된 강의가 아직 없습니다.</div>')+'</div>';
   }else{
     const items=all.filter(x=>x.grade===g&&x.semester===sem);
     const subs=[...new Set(items.map(x=>x.subject||'기타'))].sort();
@@ -498,28 +507,41 @@ function renderFeedback(){
     el.innerHTML=`<div class="card"><div class="banner" style="background:#fdecec;border-color:#f5b7b1;color:#c0392b">${hd}</div><div class="qnum">문항 ${curIdx+1} / ${total}</div>${content}${ansLine}${mine}<div class="row" style="margin-top:18px"><button class="btn" onclick="goNext()">${isLast?'✅ 시험 종료 · 최종 제출':'다음 문제로 →'}</button></div></div>`;
     return;
   }
+  const hasHelp=hasExp||!!q.lecture;
+  const lec=q.lecture?`<a class="lecture-link" href="${esc(q.lecture)}" target="_blank" rel="noopener noreferrer">🎥 관련 강의 보기 (새 창)</a>`:'';
+  const head=lastTimedOut?'⏰ 제한시간이 지나 자동 채점되었어요.':'❌ 아쉬지만 틀렸어요.';
+  let ri;
+  if(q.type==='short'){ri=`<input class="short-input" value="${esc(retryAns||'')}" oninput="setShortRetry(this.value)" placeholder="정답을 직접 입력" autocomplete="off">`;}
+  else if(q.opts){const rM=isMultiQ(q);const rHas=i=>rM?(Array.isArray(retryAns)&&retryAns.indexOf(i)>=0):(retryAns===i);ri=`${rM?'<div style="font-size:12px;color:var(--ok);margin-bottom:4px">정답을 모두 선택하세요</div>':''}<div class="opts">${q.opts.map((o,i)=>`<div class="opt${rHas(i)?' sel':''}" onclick="pickRetry(${i})"><span class="mk">${nlabel(i)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;}
+  else{const n=q.choices||5;const rM=isMultiQ(q);const rHas=i=>rM?(Array.isArray(retryAns)&&retryAns.indexOf(i)>=0):(retryAns===i);ri=`${rM?'<div style="font-size:12px;color:var(--ok);margin-bottom:4px">정답을 모두 선택하세요</div>':''}<div class="ansgrid">${Array.from({length:n},(_,i)=>`<button class="ansbtn${rHas(i)?' sel':''}" onclick="pickRetry(${i})">${nlabel(i)}</button>`).join('')}</div>`;}
+  if(hasHelp){
+    el.innerHTML=`<div class="card">
+      <div class="banner" style="background:#fdecec;border-color:#f5b7b1;color:#c0392b">${head} 시험 시간은 잠시 멈추었습니다. 아래 해설${q.lecture?' 또는 강의':''}로 충분히 학습한 뒤, 정답을 다시 입력해 제출하세요.</div>
+      <div class="qnum">문항 ${curIdx+1} / ${total}</div>
+      ${content}
+      ${expTxt}${expImg}${lec}
+      <div class="banner" style="margin-top:14px">✍️ 학습한 내용을 바탕으로 <b>정답을 다시 입력</b>해 제출하세요. <b>정답을 맞힐면</b> 다음 문제로 진행됩니다. (정답과 이전 답안은 화면에 표시되지 않아요.)</div>
+      ${ri}
+      <div class="row" style="margin-top:10px"><button class="btn" onclick="checkRetry()">정답 제출 · ${isLast?'맞히면 시험 종료':'맞히면 다음 문제'}</button></div>
+    </div>`;
+    return;
+  }
+  const noHelp=`<div class="explain">이 문항에는 등록된 해설/강의가 없습니다. 정답을 확인한 뒤 진행하세요.</div>`;
   let retryBox;
   if(retryOK){
     retryBox=`<div class="banner" style="background:#e7f7ec;border-color:#b7e4c7;color:#1b7a43;margin-top:14px">👍 정답을 입력했어요! 이제 “이해했어요”를 누르면 다음 단계로 진행됩니다.</div>`;
   }else{
-    let ri;
-    if(q.type==='short'){ri=`<input class="short-input" value="${esc(retryAns||'')}" oninput="setShortRetry(this.value)" placeholder="정답을 직접 입력" autocomplete="off">`;}
-    else if(q.opts){const rM=isMultiQ(q);const rHas=i=>rM?(Array.isArray(retryAns)&&retryAns.indexOf(i)>=0):(retryAns===i);ri=`${rM?'<div style="font-size:12px;color:var(--ok);margin-bottom:4px">정답을 모두 선택하세요</div>':''}<div class="opts">${q.opts.map((o,i)=>`<div class="opt${rHas(i)?' sel':''}" onclick="pickRetry(${i})"><span class="mk">${nlabel(i)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;}
-    else{const n=q.choices||5;const rM=isMultiQ(q);const rHas=i=>rM?(Array.isArray(retryAns)&&retryAns.indexOf(i)>=0):(retryAns===i);ri=`${rM?'<div style="font-size:12px;color:var(--ok);margin-bottom:4px">정답을 모두 선택하세요</div>':''}<div class="ansgrid">${Array.from({length:n},(_,i)=>`<button class="ansbtn${rHas(i)?' sel':''}" onclick="pickRetry(${i})">${nlabel(i)}</button>`).join('')}</div>`;}
-    retryBox=`<div class="banner" style="margin-top:14px">✍️ 해설을 보고 <b>직접 정답을 입력</b>해 보세요. 정답을 맞춰야 다음으로 진행할 수 있습니다.</div>${ri}<div class="row" style="margin-top:8px"><button class="btn" onclick="checkRetry()">정답 확인</button></div>`;
+    retryBox=`<div class="banner" style="margin-top:14px">✍️ <b>직접 정답을 입력</b>해 보세요. 정답을 맞춰야 다음으로 진행할 수 있습니다.</div>${ri}<div class="row" style="margin-top:8px"><button class="btn" onclick="checkRetry()">정답 확인</button></div>`;
   }
-  const lec=q.lecture?`<a class="lecture-link" href="${esc(q.lecture)}" target="_blank" rel="noopener noreferrer">🎥 관련 강의 보기 (새 창)</a>`:'';
-  const noHelp=(!hasExp&&!q.lecture)?`<div class="explain">이 문항에는 등록된 해설/강의가 없습니다. 정답을 확인한 뒤 진행하세요.</div>`:'';
-  const head=lastTimedOut?'⏰ 제한시간이 지나 자동 채점되었어요.':'❌ 아쉬지만 틀렸어요.';
   el.innerHTML=`<div class="card">
-    <div class="banner" style="background:#fdecec;border-color:#f5b7b1;color:#c0392b">${head} 시험 시간은 잠시 멈추었습니다. 아래 해설${q.lecture?' 또는 강의':''}로 충분히 학습한 뒤 진행하세요.</div>
+    <div class="banner" style="background:#fdecec;border-color:#f5b7b1;color:#c0392b">${head} 시험 시간은 잠시 멈추었습니다.</div>
     <div class="qnum">문항 ${curIdx+1} / ${total}</div>
     ${content}
     ${ansLine}
     ${mine}
-    ${expTxt}${expImg}${lec}${noHelp}
+    ${noHelp}
     ${retryBox}
-    <div class="banner" style="margin-top:18px">🤔 이 문항의 풀이·해설을 이해했나요?</div>
+    <div class="banner" style="margin-top:18px">🤔 정답을 확인했나요?</div>
     <div class="row">
       <button class="btn" ${retryOK?'':'disabled'} onclick="ackUnderstood()">✅ 이해했어요 · ${isLast?'시험 종료':'다음 문제로'}</button>
       <button class="btn ghost" onclick="notUnderstood()">아직 잘 모르겠어요</button>
@@ -530,9 +552,12 @@ window.pickRetry=function(i){const q=curTest.questions[curIdx];if(isMultiQ(q)){l
 window.setShortRetry=function(v){retryAns=v;};
 window.checkRetry=function(){
   const q=curTest.questions[curIdx];
-  if(unanswered(q,retryAns)){alert('정답을 입력(선택)한 뒤 확인하세요.');return;}
-  if(isCorrect(q,retryAns)){retryOK=true;renderFeedback();}
-  else{alert('아직 정답이 아니에요. 해설을 다시 확인하고 정답을 입력해 보세요.');}
+  if(unanswered(q,retryAns)){alert('정답을 입력(선택)한 뒤 제출하세요.');return;}
+  if(isCorrect(q,retryAns)){
+    const hasHelp=!!(q.explain||expImgs(q).length||q.lecture);
+    if(hasHelp){goNext();return;}
+    retryOK=true;renderFeedback();
+  }else{alert('아직 정답이 아니에요. 해설·강의를 다시 확인하고 다시 생각해 보세요.');}
 };
 window.notUnderstood=function(){alert('해설과 강의를 다시 천천히 확인해 보세요. 충분히 이해했으면 “이해했어요”를 누르세요.');renderFeedback();};
 window.ackUnderstood=function(){goNext();};
@@ -835,20 +860,22 @@ function renderAdmin(){
     const keys=Object.keys(studs).sort();
     const srows=keys.map((sid,i)=>{const s=studs[sid];return `<tr>
       <td>${esc(s.name)}</td><td>${esc(sid)}</td>
+      <td style="text-align:center"><select onchange="setStuGrade(${i},this.value)" style="padding:5px 6px;border:1px solid var(--line);border-radius:8px">${gradeOptions(s.grade||'')}</select></td>
       <td style="text-align:center">${s.pw?'<span style="color:var(--ok)">설정됨</span>':'<span style="color:var(--warn)">미설정</span>'}</td>
       <td style="text-align:center;white-space:nowrap">
         <button class="btn ghost sm" onclick="resetStuPw(${i})">암호 초기화</button>
         <button class="btn ghost sm" onclick="setStuPw(${i})">암호 지정</button>
         <button class="btn ghost sm" onclick="delStudent(${i})">삭제</button>
       </td></tr>`;}).join('');
-    body=`<div class="banner">💡 여기에 등록된 수강생만 로그인할 수 있습니다. 학생은 첫 로그인 시 본인이 개인 암호를 설정하며(대리시험 방지), 관리자는 암호를 초기화하거나 직접 지정할 수 있습니다.</div>
+    body=`<div class="banner">💡 여기에 등록된 수강생만 로그인할 수 있습니다. 학년을 지정하면 학생이 로그인 후 본인 학년의 시험·강의만 보게 됩니다.</div>
       <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
-        <div style="flex:1;min-width:140px"><label>이름</label><input id="newnm" placeholder="예: 김학생" autocomplete="off"></div>
-        <div style="flex:1;min-width:140px"><label>학생 번호(고유)</label><input id="newsid" placeholder="예: 2026-001" autocomplete="off"></div>
+        <div style="flex:1;min-width:120px"><label>이름</label><input id="newnm" placeholder="예: 김학생" autocomplete="off"></div>
+        <div style="flex:1;min-width:120px"><label>학생 번호(고유)</label><input id="newsid" placeholder="예: 2026-001" autocomplete="off"></div>
+        <div style="min-width:110px"><label>학년</label><select id="newgrade" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:10px">${gradeOptions('')}</select></div>
         <button class="btn" onclick="addStudent()">➕ 등록</button>
       </div>
       <h3 style="margin:18px 0 6px">등록된 수강생 (${keys.length}명)</h3>
-      <table><thead><tr><th style="text-align:left">이름</th><th style="text-align:left">학생 번호</th><th>암호</th><th>관리</th></tr></thead><tbody>${srows||'<tr><td colspan="4" style="text-align:center;color:var(--muted)">등록된 수강생이 없습니다.</td></tr>'}</tbody></table>`;
+      <table><thead><tr><th style="text-align:left">이름</th><th style="text-align:left">학생 번호</th><th>학년</th><th>암호</th><th>관리</th></tr></thead><tbody>${srows||'<tr><td colspan="5" style="text-align:center;color:var(--muted)">등록된 수강생이 없습니다.</td></tr>'}</tbody></table>`;
   } else if(adminTab==='lectures'){
     const L=loadLectures();
     const rows=L.map((x,i)=>`<tr><td>${esc(x.grade||'')}</td><td>${esc(x.semester||'')}</td><td>${esc(x.subject||'')}</td><td>${esc(x.title||'')}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><a href="${esc(x.url||'')}" target="_blank" rel="noopener noreferrer">${esc(x.url||'')}</a></td><td style="text-align:center;white-space:nowrap"><button class="btn ghost sm" onclick="delLecture(${i})">🗑 삭제</button></td></tr>`).join('');
@@ -905,7 +932,8 @@ function renderAdmin(){
 }
 window.renderAdmin=renderAdmin;
 window.backToStudent=function(){entryTestId=null;adminAuthed=false;setAdminSess(false);viewLogin();};
-window.addStudent=function(){const n=document.getElementById('newnm').value.trim(),i=document.getElementById('newsid').value.trim();if(!n||!i){alert('이름과 학생 번호를 모두 입력하세요.');return;}const m=getStudents();if(m[i]){alert('이미 등록된 학생 번호입니다.');return;}m[i]={sid:i,name:n,pw:''};saveStudents(m);cloudSaveStudent(m[i]);renderAdmin();};
+window.addStudent=function(){const n=document.getElementById('newnm').value.trim(),i=document.getElementById('newsid').value.trim(),g=document.getElementById('newgrade').value;if(!n||!i){alert('이름과 학생 번호를 모두 입력하세요.');return;}const m=getStudents();if(m[i]){alert('이미 등록된 학생 번호입니다.');return;}m[i]={sid:i,name:n,pw:'',grade:g||''};saveStudents(m);cloudSaveStudent(m[i]);renderAdmin();};
+window.setStuGrade=function(idx,val){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;const m=getStudents();m[sid].grade=val||'';saveStudents(m);cloudSaveStudent(m[sid]);if(student&&student.sid===sid)student.grade=m[sid].grade;renderAdmin();};
 window.delStudent=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;if(!confirm('이 수강생을 삭제할까요? 기존 성적 기록은 유지됩니다.'))return;const m=getStudents();delete m[sid];saveStudents(m);cloudDelStudent(sid);renderAdmin();};
 window.resetStuPw=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;if(!confirm('암호를 초기화하면 학생이 다음 로그인 시 새 개인 암호를 다시 설정합니다. 진행할까요?'))return;const m=getStudents();m[sid].pw='';saveStudents(m);cloudSaveStudent(m[sid]);alert('암호가 초기화되었습니다.');renderAdmin();};
 window.setStuPw=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;const p=prompt('지정할 개인 암호를 입력하세요 (4자 이상):');if(p==null)return;if(p.length<4){alert('암호는 4자 이상이어야 합니다.');return;}const m=getStudents();m[sid].pw=hashPw(p);saveStudents(m);cloudSaveStudent(m[sid]);alert('암호가 지정되었습니다.');renderAdmin();};
@@ -1103,7 +1131,7 @@ function customToggles(){
 }
 window.setCustom=function(k,v){editData.custom=editData.custom||{};editData.custom[k]=v;};
 function blankQ(){return{img:'',imgs:[],type:'choice',choices:5,ans:0,ansMulti:[0],ansText:'',explain:'',explainImg:'',explainImgs:[],lecture:'',limit:0};}
-window.newTest=function(){editData={id:'t'+Date.now(),title:'',subject:'',minutes:10,mode:'learning',questions:[blankQ()]};adminTab='edit';renderAdmin();};
+window.newTest=function(){editData={id:'t'+Date.now(),title:'',subject:'',grade:'',minutes:10,mode:'learning',questions:[blankQ()]};adminTab='edit';renderAdmin();};
 window.addLecture=function(){
   const g=document.getElementById('lgrade').value.trim();
   const s=document.getElementById('lsem').value.trim();
@@ -1159,6 +1187,7 @@ function renderEdit(){
     <div class="banner">💡 문제/해설 이미지를 불러온 뒤 <b>여러 문제 중 원하는 부분을 박스로 드래그</b>하면 그 영역만 잘라서 올라갑니다. 정답은 5지선다형 또는 단답형으로 입력합니다.</div>
     <label>시험 제목</label><input value="${esc(editData.title)}" oninput="editData.title=this.value">
     <label>과목</label><input value="${esc(editData.subject)}" oninput="editData.subject=this.value">
+    <label>대상 학년 <span style="color:var(--muted);font-size:12px">— 지정하면 해당 학년 학생에게만 표시됩니다(미지정=전체 공통)</span></label><select onchange="editData.grade=this.value" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:10px">${gradeOptions(editData.grade||'')}</select>
     <label>전체 제한시간(분) <span style="color:var(--muted);font-size:12px">— 문항별 제한시간이 없을 때 사용</span></label><input type="number" min="1" value="${editData.minutes}" oninput="editData.minutes=+this.value">
     <div class="banner" style="background:#eef6ff;border-color:#b3d4fc;font-size:13px;margin-top:6px">⏱️ 문항별 제한시간 합계: <b id="autoTotal">${fmtSec(sumLimitSec(editData))}</b><span id="autoTotalNote">${sumLimitSec(editData)>0?' · 합계가 있으므로 전체 시험 시간은 이 값으로 자동 적용됩니다.':' · 합계가 0이면 위 전체 제한시간이 사용됩니다.'}</span></div>
     <label>시험 방식</label>
