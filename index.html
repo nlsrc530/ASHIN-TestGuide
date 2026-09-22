@@ -142,7 +142,7 @@ thead tr{background:var(--soft)}
 <div class="wrap">
   <div class="brandbar">
     <div class="logo">📚</div>
-    <div><h1>아신수학전문학원 TestGuide</h1><p>학원생 전용 평가 시스템</p></div>
+    <div><h1 id="brandTitle">아신수학전문학원 TestGuide</h1><p>학원생 전용 평가 시스템</p></div>
     <div id="cloudStatus" style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#fff"></div>
   </div>
   <div id="app"></div>
@@ -193,6 +193,10 @@ const SEED=[
 function loadTests(){try{const d=JSON.parse(localStorage.getItem(LS_TESTS));return d&&d.length?d:SEED;}catch(e){return SEED;}}
 function saveTests(t){localStorage.setItem(LS_TESTS,JSON.stringify(t));cloudSaveTests(t);}
 const LS_LECTURES='acad_lectures_v1';
+const LS_TITLE='acad_title_v1', DEFAULT_TITLE='아신수학전문학원 TestGuide';
+function getTitle(){try{var v=localStorage.getItem(LS_TITLE);return(v&&v.trim())?v:DEFAULT_TITLE;}catch(e){return DEFAULT_TITLE;}}
+function applyTitle(){try{var t=getTitle();var h=document.getElementById('brandTitle');if(h)h.textContent=t;document.title=t;}catch(e){}}
+function setTitle(t){t=(t&&t.trim())?t.trim():DEFAULT_TITLE;localStorage.setItem(LS_TITLE,t);applyTitle();if(cloudOn&&CLOUD){try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'config','appTitle'),{title:t}).catch(function(){});}catch(e){}}}
 function loadLectures(){try{return JSON.parse(localStorage.getItem(LS_LECTURES))||[];}catch(e){return[];}}
 function saveLectures(l){localStorage.setItem(LS_LECTURES,JSON.stringify(l));cloudSaveLectures(l);}
 function loadResults(){try{return JSON.parse(localStorage.getItem(LS_RESULTS))||[];}catch(e){return[];}}
@@ -235,7 +239,7 @@ function getPw(){return localStorage.getItem(LS_ADMINPW);}
 function setPw(p){localStorage.setItem(LS_ADMINPW,hashPw(p));}
 
 /* ============ CLOUD SYNC (Firebase Firestore) ============ */
-let CLOUD=null, cloudOn=false, curView='login';
+let CLOUD=null, cloudOn=false, curView='login', lastCloudErr='';
 function sanId(s){let x=encodeURIComponent(String(s));x=x.replace(/[.#$\[\]\/*]/g,'_');return x||'_';}
 function newRid(){return 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
 function cloudSaveTests(list){if(!cloudOn)return;try{(list||[]).forEach(function(t){if(t&&t.id)CLOUD.setDoc(CLOUD.doc(CLOUD.db,'tests',sanId(t.id)),t).catch(function(){});});}catch(e){}}
@@ -537,8 +541,6 @@ function renderFeedback(){
     <div class="banner" style="background:#fdecec;border-color:#f5b7b1;color:#c0392b">${head} 시험 시간은 잠시 멈추었습니다.</div>
     <div class="qnum">문항 ${curIdx+1} / ${total}</div>
     ${content}
-    ${ansLine}
-    ${mine}
     ${noHelp}
     ${retryBox}
     <div class="banner" style="margin-top:18px">🤔 정답을 확인했나요?</div>
@@ -706,18 +708,21 @@ window.viewReview=function(tid,idx){
   const review=test.questions.map((q,i)=>{
     const ua=r.answers[i], ok=isCorrect(q,ua);
     const content=qImgs(q).length?imgsHtml(qImgs(q),'qimg','문제'):`<div class="qtext" style="font-size:16px">${esc(q.q)}</div>`;
+    const hasHelp=!!(q.explain||expImgs(q).length||q.lecture);
+    const hideAns=!ok&&hasHelp;
+    const lock='🔒 해설·강의로 직접 확인하세요';
     let optsHtml, ansLine;
     if(q.type==='short'){
-      optsHtml=`<div class="short-ans">정답: <b>${esc(q.ansText||'')}</b></div>`;
+      optsHtml=`<div class="short-ans">정답: <b>${hideAns?lock:esc(q.ansText||'')}</b></div>`;
       ansLine=`<div style="margin-top:8px;font-size:13px;color:var(--muted)">내 답: ${ua&&String(ua).trim()!==''?esc(ua):'미응답'}</div>`;
     }else if(q.opts){
       const cs=correctSet(q);const uaHas=j=>Array.isArray(ua)?ua.indexOf(j)>=0:(ua===j);
-      optsHtml=q.opts.map((o,j)=>{let cls=cs.indexOf(j)>=0?'correct':(uaHas(j)&&!ok?'wrong':'');return `<div class="opt ${cls}"><span class="mk">${nlabel(j)}</span><span>${esc(o)}</span></div>`;}).join('');
-      ansLine=`<div style="margin-top:8px;font-size:13px;color:var(--muted)">내 답: ${myAnsLabel2(ua)} · 정답: ${correctLabels(q)}</div>`;
+      optsHtml=q.opts.map((o,j)=>{let cls=hideAns?(uaHas(j)&&!ok?'wrong':''):(cs.indexOf(j)>=0?'correct':(uaHas(j)&&!ok?'wrong':''));return `<div class="opt ${cls}"><span class="mk">${nlabel(j)}</span><span>${esc(o)}</span></div>`;}).join('');
+      ansLine=`<div style="margin-top:8px;font-size:13px;color:var(--muted)">내 답: ${myAnsLabel2(ua)}${hideAns?` · 정답: ${lock}`:` · 정답: ${correctLabels(q)}`}</div>`;
     }else{
       const n=q.choices||5;const cs=correctSet(q);const uaHas=j=>Array.isArray(ua)?ua.indexOf(j)>=0:(ua===j);
-      optsHtml=`<div class="ansgrid">${Array.from({length:n},(_,j)=>{let cls=cs.indexOf(j)>=0?'correct':(uaHas(j)&&!ok?'wrong':'');return `<button class="ansbtn ${cls}">${nlabel(j)}</button>`;}).join('')}</div>`;
-      ansLine=`<div style="margin-top:8px;font-size:13px;color:var(--muted)">내 답: ${myAnsLabel2(ua)} · 정답: ${correctLabels(q)}</div>`;
+      optsHtml=`<div class="ansgrid">${Array.from({length:n},(_,j)=>{let cls=hideAns?(uaHas(j)&&!ok?'wrong':''):(cs.indexOf(j)>=0?'correct':(uaHas(j)&&!ok?'wrong':''));return `<button class="ansbtn ${cls}">${nlabel(j)}</button>`;}).join('')}</div>`;
+      ansLine=`<div style="margin-top:8px;font-size:13px;color:var(--muted)">내 답: ${myAnsLabel2(ua)}${hideAns?` · 정답: ${lock}`:` · 정답: ${correctLabels(q)}`}</div>`;
     }
     const expImg=expImgs(q).length?imgsHtml(expImgs(q),'expimg','해설'):'';
     const expTxt=q.explain?`<div class="explain">💡 ${esc(q.explain)}</div>`:'';
@@ -854,7 +859,13 @@ function renderAdmin(){
       </div></div>`).join('');
     body=`<div class="banner">💡 각 시험의 링크를 복사해 학원 카페에 올리세요. 학생이 링크를 누르면 해당 시험으로 바로 입장합니다.</div>
       <div class="testlist">${list||'<div class="empty">등록된 시험이 없습니다.</div>'}</div>
-      <div class="row" style="margin-top:14px"><button class="btn" onclick="newTest()">➕ 새 시험 만들기</button><button class="btn ghost" onclick="changePw()">🔑 관리자 암호 변경</button></div>`;
+      <div class="row" style="margin-top:14px"><button class="btn" onclick="newTest()">➕ 새 시험 만들기</button><button class="btn ghost" onclick="changePw()">🔑 관리자 암호 변경</button></div>
+      <div class="banner" style="margin-top:18px">🏷️ 시작 화면 상단 제목(학원 이름)을 원하는 대로 바꿀 수 있어요. 비워두면 기본값으로 돌아갑니다.</div>
+      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px"><label>시작 화면 제목</label><input id="brandTitleInput" value="${esc(getTitle())}" autocomplete="off"></div>
+        <button class="btn" onclick="saveTitle()">저장</button>
+        <button class="btn ghost" onclick="resetTitle()">기본값</button>
+      </div>`;
   } else if(adminTab==='students'){
     const studs=getStudents();
     const keys=Object.keys(studs).sort();
@@ -931,6 +942,8 @@ function renderAdmin(){
   </div>`;
 }
 window.renderAdmin=renderAdmin;
+window.saveTitle=function(){var el=document.getElementById('brandTitleInput');if(!el)return;var v=(el.value||'').trim();if(!v){alert('제목을 입력하세요. 비우면 기본값이 적용됩니다.');}setTitle(v);alert('시작 화면 제목이 저장되었어요.');renderAdmin();};
+window.resetTitle=function(){if(!confirm('제목을 기본값(아신수학전문학원 TestGuide)으로 되돌릴까요?'))return;setTitle('');renderAdmin();};
 window.backToStudent=function(){entryTestId=null;adminAuthed=false;setAdminSess(false);viewLogin();};
 window.addStudent=function(){const n=document.getElementById('newnm').value.trim(),i=document.getElementById('newsid').value.trim(),g=document.getElementById('newgrade').value;if(!n||!i){alert('이름과 학생 번호를 모두 입력하세요.');return;}const m=getStudents();if(m[i]){alert('이미 등록된 학생 번호입니다.');return;}m[i]={sid:i,name:n,pw:'',grade:g||''};saveStudents(m);cloudSaveStudent(m[i]);renderAdmin();};
 window.setStuGrade=function(idx,val){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;const m=getStudents();m[sid].grade=val||'';saveStudents(m);cloudSaveStudent(m[sid]);if(student&&student.sid===sid)student.grade=m[sid].grade;renderAdmin();};
@@ -1339,6 +1352,7 @@ window.showInfographic=function(scope,arg){
 /* ============ INIT ============ */
 window.__bootApp=function(){
   if(window.__booted)return; window.__booted=true;
+  try{applyTitle();}catch(e){}
   try{renderCloudStatus();}catch(e){}
   const tid=getParam('test');
   if(tid&&loadTests().find(t=>t.id===tid)){entryTestId=tid;}
@@ -1357,7 +1371,8 @@ function renderCloudStatus(){
   if(cloudOn){
     el.innerHTML='<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block"></span>\uD074\uB77C\uC6B0\uB4DC \uC5F0\uACB0\uB428</span><button id="cloudReloadBtn" style="background:rgba(255,255,255,.25);border:0;color:#fff;border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer">\uD83D\uDD04 \uC0C8\uB85C\uACE0\uCE68</button>';
   }else{
-    el.innerHTML='<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block"></span>\uB85C\uCEEC \uBAA8\uB4DC(\uBBF8\uB3D9\uAE30\uD654)</span>';
+    var denied=(lastCloudErr==='permission-denied');
+    el.innerHTML='<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:'+(denied?'#ef4444':'#f59e0b')+';display:inline-block"></span>'+(denied?'\uC11C\uBC84 \uAD8C\uD55C \uAC70\uBD80(\uADDC\uCE59 \uD655\uC778)':'\uB85C\uCEEC \uBAA8\uB4DC(\uBBF8\uB3D9\uAE30\uD654)')+'</span><button id="cloudReloadBtn" style="background:rgba(255,255,255,.25);border:0;color:#fff;border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer">\uD83D\uDD04 \uC0C8\uB85C\uACE0\uCE68</button>';
   }
   var b=document.getElementById('cloudReloadBtn');if(b)b.onclick=function(){window.reloadFromCloud();};
 }
@@ -1371,6 +1386,7 @@ async function cloudPull(){
     const lSnap=await getDoc(doc(db,'config','lectures'));
     if(lSnap.exists()&&lSnap.data().data){localStorage.setItem(LS_LECTURES,JSON.stringify(lSnap.data().data));}
     else{cloudSaveLectures(loadLectures());}
+    try{const ttSnap=await getDoc(doc(db,'config','appTitle'));if(ttSnap.exists()&&ttSnap.data().title){localStorage.setItem(LS_TITLE,ttSnap.data().title);applyTitle();}else if(getTitle()!==DEFAULT_TITLE||localStorage.getItem(LS_TITLE)){CLOUD.setDoc(doc(db,'config','appTitle'),{title:getTitle()}).catch(function(){});}}catch(e){}
     const sSnap=await getDocs(collection(db,'students'));
     if(!sSnap.empty){const m={};sSnap.forEach(d=>{const v=d.data();if(v.sid)m[v.sid]=v;});localStorage.setItem(LS_STUDENTS,JSON.stringify(m));}
     else{const loc=getStudents();Object.keys(loc).forEach(k=>cloudSaveStudent(loc[k]));}
@@ -1380,15 +1396,19 @@ async function cloudPull(){
     const uSnap=await getDocs(collection(db,'usage'));
     if(!uSnap.empty){const m={};uSnap.forEach(d=>{const v=d.data();if(v.key)m[v.key]=v.entry;});localStorage.setItem(LS_USAGE,JSON.stringify(m));}
     else{const loc=getUsageStore();Object.keys(loc).forEach(k=>cloudSaveUsage(k,loc[k]));}
+    lastCloudErr='';
     return true;
-  }catch(e){console.warn('cloud pull',e);return false;}
+  }catch(e){console.warn('cloud pull',e);lastCloudErr=(e&&e.code)||'';return false;}
 }
 window.reloadFromCloud=async function(){
   var b=document.getElementById('cloudReloadBtn');if(b){b.disabled=true;b.textContent='\u2026';}
   const ok=await cloudPull();
   if(ok){tests=loadTests();refreshView();}
   renderCloudStatus();
-  if(!ok)alert('\uD074\uB77C\uC6B0\uB4DC\uC5D0\uC11C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC5B4\uC694. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574\uC8FC\uC138\uC694.');
+  if(!ok){
+    if(lastCloudErr==='permission-denied')alert('\uD074\uB77C\uC6B0\uB4DC \uC811\uADFC \uAD8C\uD55C\uC774 \uAC70\uBD80\uB410\uC5B4\uC694.\n\nFirebase \uBCF4\uC548 \uADDC\uCE59(Rules)\uC774 \uB9CC\uB8CC\uB418\uC5C8\uAC70\uB098 \uC811\uADFC\uC744 \uC81C\uD55C\uD558\uACE0 \uC788\uC744 \uC218 \uC788\uC5B4\uC694. \uAD00\uB9AC\uC790\uC5D0\uAC8C Firestore \uADDC\uCE59 \uD655\uC778\uC744 \uC694\uCCAD\uD574\uC8FC\uC138\uC694.');
+    else alert('\uD074\uB77C\uC6B0\uB4DC\uC5D0\uC11C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC5B4\uC694. \uC778\uD130\uB137 \uC5F0\uACB0\uC744 \uD655\uC778\uD55C \uB4A4 \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574\uC8FC\uC138\uC694.');
+  }
 };
 window.__cloudReady=async function(fs){
   CLOUD=fs; cloudOn=true;
@@ -1398,6 +1418,7 @@ window.__cloudReady=async function(fs){
   try{
     onSnapshot(collection(db,'tests'),qs=>{const arr=[];qs.forEach(d=>arr.push(d.data()));arr.sort((a,b)=>String(a.id||'').localeCompare(String(b.id||'')));applyTestsSnap(arr);});
     onSnapshot(doc(db,'config','lectures'),d=>{if(d.exists()&&d.data().data)applyLecturesSnap(d.data().data);});
+    onSnapshot(doc(db,'config','appTitle'),d=>{if(d.exists()&&d.data().title){localStorage.setItem(LS_TITLE,d.data().title);applyTitle();}});
     onSnapshot(collection(db,'students'),qs=>{const m={};qs.forEach(d=>{const v=d.data();if(v.sid)m[v.sid]=v;});applyStudentsSnap(m);});
     onSnapshot(collection(db,'results'),qs=>{const arr=[];qs.forEach(d=>arr.push(d.data()));arr.sort((a,b)=>(a.date||'').localeCompare(b.date||''));applyResultsSnap(arr);});
     onSnapshot(collection(db,'usage'),qs=>{const m={};qs.forEach(d=>{const v=d.data();if(v.key)m[v.key]=v.entry;});applyUsageSnap(m);});
