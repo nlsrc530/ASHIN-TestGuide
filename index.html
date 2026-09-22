@@ -151,6 +151,18 @@ const LS_TESTS='acad_tests_v2', LS_RESULTS='acad_results_v2';
 const el=document.getElementById('app');
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nlabel=i=>'('+(i+1)+')';
+function qImgs(q){return (Array.isArray(q.imgs)&&q.imgs.length)?q.imgs:(q.img?[q.img]:[]);}
+function expImgs(q){return (Array.isArray(q.explainImgs)&&q.explainImgs.length)?q.explainImgs:(q.explainImg?[q.explainImg]:[]);}
+function imgsHtml(arr,cls,alt){return arr.map(function(s){return '<img class="'+cls+'" src="'+s+'" alt="'+(alt||'')+'">';}).join('');}
+function correctSet(q){if(Array.isArray(q.ansMulti)&&q.ansMulti.length)return q.ansMulti.slice();return [q.ans];}
+function correctLabels(q){return correctSet(q).map(nlabel).join(', ');}
+function isMultiQ(q){return q.type!=='short'&&correctSet(q).length>1;}
+function myAnsLabel(a){if(Array.isArray(a))return a.length?a.slice().sort((x,y)=>x-y).map(nlabel).join(', '):'(미선택)';return a>=0?nlabel(a):'(미선택)';}
+function myAnsLabel2(a){if(Array.isArray(a))return a.length?a.slice().sort((x,y)=>x-y).map(nlabel).join(', '):'미응답';return a>=0?nlabel(a):'미응답';}
+function sumLimitSec(t){return ((t&&t.questions)||[]).reduce((a,q)=>a+(+(q&&q.limit)||0),0);}
+function testTotalSec(t){const s=sumLimitSec(t);return s>0?s:((+(t&&t.minutes)||0)*60);}
+function fmtSec(s){s=Math.max(0,+s||0);const m=Math.floor(s/60),x=s%60;return x?`${m}분 ${x}초`:`${m}분`;}
+function fmtTestTime(t){return fmtSec(testTotalSec(t));}
 
 const SEED=[
  {id:'t1',title:'중등 수학 - 기초 연산',subject:'수학',minutes:10,questions:[
@@ -251,7 +263,7 @@ function viewLogin(){
   curView='login';
   stopTimer();
   const t=entryTestId?loadTests().find(x=>x.id===entryTestId):null;
-  const banner=t?`<div class="banner">🏫 학원 카페 링크로 입장했어요<br><b>“${esc(t.title)}”</b> 시험 (${t.questions.length}문항 · ${t.minutes}분)</div>`:'';
+  const banner=t?`<div class="banner">🏫 학원 카페 링크로 입장했어요<br><b>“${esc(t.title)}”</b> 시험 (${t.questions.length}문항 · ${fmtTestTime(t)})</div>`:'';
   el.innerHTML=`<div class="card">
     <h2>👋 수강생 로그인</h2>
     <p class="sub">관리자에게 <b>등록된 이름과 학생 번호</b>로 로그인하세요. 첫 로그인 시 본인이 개인 암호를 직접 설정합니다.</p>
@@ -312,7 +324,7 @@ window.viewTests=function(){
   const done=loadResults();
   const isDone=tid=>done.some(r=>r.testId===tid&&r.sid===student.id&&r.student===student.name);
   const list=tests.map(t=>{const d=isDone(t.id);return `<div class="testitem" onclick="startTest('${t.id}')">
-    <div><h3>${esc(t.title)}</h3><div class="meta">${t.questions.length}문항 · 제한시간 ${t.minutes}분 · <span style="color:var(--brand);font-weight:600">${modeLabel(t.mode||'learning')}</span>${d?' · <span style="color:var(--ok);font-weight:700">✔ 응시 완료(문제 확인만 가능)</span>':''}</div></div>
+    <div><h3>${esc(t.title)}</h3><div class="meta">${t.questions.length}문항 · 제한시간 ${fmtTestTime(t)} · <span style="color:var(--brand);font-weight:600">${modeLabel(t.mode||'learning')}</span>${d?' · <span style="color:var(--ok);font-weight:700">✔ 응시 완료(문제 확인만 가능)</span>':''}</div></div>
     <span class="pill blue">${esc(t.subject)}</span></div>`;}).join('');
   el.innerHTML=`<div class="card">
     <div class="row between">
@@ -378,14 +390,14 @@ function renderGuide(tid){
   if(cf.explain){rules.push('틀리거나 제한시간이 지나면 <b>해설·강의</b>를 보여드리며, <b>정답을 다시 입력</b>해야 합니다. 정답을 제출한 뒤 <b>“이해했어요”</b>를 눌러야 다음 단계로 진행됩니다.');}
   if(cf.perQLimit){rules.push('문항별로 <b>제한시간</b>이 있을 수 있으며, 시간이 지나면 해당 문항이 처리됩니다.');}
   if(cf.freeNav){rules.push('문항을 <b>자유롭게 오가며</b> 풀 수 있습니다.');}else if(cf.immediate){rules.push('문항은 <b>순서대로</b> 진행되며 이전 문항으로 돌아갈 수 없습니다.');}
-  if(cf.totalTime){rules.push('전체 제한시간 <b>'+t.minutes+'분</b>이 지나면 시험이 <b>자동 종료·제출</b>됩니다. 종료 <b>1분 전</b> 예고 안내가 표시됩니다.');}
+  if(cf.totalTime){rules.push('전체 제한시간 <b>'+fmtTestTime(t)+'</b>이 지나면 시험이 <b>자동 종료·제출</b>됩니다. 종료 <b>1분 전</b> 예고 안내가 표시됩니다.');}
   if(cf.totalTime&&!cf.earlyClose){rules.push('전체 시간이 지나기 전에는 <b>조기에 종료할 수 없습니다.</b>');}
   if(cf.earlyClose){rules.push('원하면 <b>먼저 제출</b>할 수 있습니다.');}
   rules.push('성적은 <b>처음 선택·입력한 답안</b>을 기초로 작성됩니다.');
   rules.push('답안은 <b>한 번만 제출</b>할 수 있습니다.');
   el.innerHTML=`<div class="card">
     <h2>📋 시험 안내</h2>
-    <p class="sub">${esc(t.title)} · ${t.questions.length}문항 · 제한시간 ${t.minutes}분 · <b style="color:var(--brand)">${modeLabel(m)}</b></p>
+    <p class="sub">${esc(t.title)} · ${t.questions.length}문항 · 제한시간 ${fmtTestTime(t)} · <b style="color:var(--brand)">${modeLabel(m)}</b></p>
     <div class="banner">아래 진행 방식을 읽고 숭지한 뒤 시작하세요.</div>
     <ul style="line-height:1.9;padding-left:20px;margin:10px 0">${rules.map(r=>'<li>'+r+'</li>').join('')}</ul>
     <label class="row" style="gap:8px;align-items:center;margin-top:8px;cursor:pointer"><input type="checkbox" id="ackchk" onchange="document.getElementById('startbtn').disabled=!this.checked"> <span>위 내용을 모두 숙지했습니다.</span></label>
@@ -400,7 +412,7 @@ window.startTestGo=function(){
   qRemain=curTest.questions.map(q=>{const l=+(q.limit||0);return (cfg.perQLimit&&l>0)?l:0;});
   qLocked=curTest.questions.map(()=>false);
   wrongList=[];
-  timeLeft=curTest.minutes*60;
+  timeLeft=testTotalSec(curTest);
   reviewMode=false;
   renderQuestion();
   startGlobalTimer();
@@ -445,20 +457,20 @@ window.submitAnswer=function(timedOut){
   const correct=!unanswered(q,answers[curIdx]) && isCorrect(q,answers[curIdx]);
   if(!correct && wrongList.indexOf(curIdx)<0) wrongList.push(curIdx);
   lastCorrect=correct; lastTimedOut=!!timedOut;
-  retryAns=(q.type==='short')?'':-1; retryOK=false;
+  retryAns=(q.type==='short')?'':(isMultiQ(q)?[]:-1); retryOK=false;
   renderFeedback();
 };
 function renderFeedback(){
   const q=curTest.questions[curIdx], total=curTest.questions.length;
   const isLast=curIdx===total-1;
-  const content=q.img?`<img class="qimg" src="${q.img}" alt="문제">`:`<div class="qtext">${esc(q.q||'')}</div>`;
+  const content=qImgs(q).length?imgsHtml(qImgs(q),'qimg','문제'):`<div class="qtext">${esc(q.q||'')}</div>`;
   let ansLine;
   if(q.type==='short')ansLine=`<div class="short-ans">정답: <b>${esc(q.ansText||'')}</b></div>`;
-  else if(q.opts){ansLine=`<div class="opts">${q.opts.map((o,j)=>`<div class="opt ${j===q.ans?'correct':''}"><span class="mk">${nlabel(j)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;}
-  else ansLine=`<div style="margin-top:8px;font-size:14px;color:var(--muted)">정답: <b style="color:var(--ok)">${nlabel(q.ans)}</b></div>`;
+  else if(q.opts){const cs=correctSet(q);ansLine=`<div class="opts">${q.opts.map((o,j)=>`<div class="opt ${cs.indexOf(j)>=0?'correct':''}"><span class="mk">${nlabel(j)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;}
+  else ansLine=`<div style="margin-top:8px;font-size:14px;color:var(--muted)">정답: <b style="color:var(--ok)">${correctLabels(q)}</b></div>`;
   let mine;
   if(q.type==='short')mine=`<div style="font-size:13px;color:var(--muted);margin-top:4px">내 답: <b>${answers[curIdx]?esc(answers[curIdx]):'(미입력)'}</b></div>`;
-  else mine=`<div style="font-size:13px;color:var(--muted);margin-top:4px">내 답: <b>${answers[curIdx]>=0?nlabel(answers[curIdx]):'(미선택)'}</b></div>`;
+  else mine=`<div style="font-size:13px;color:var(--muted);margin-top:4px">내 답: <b>${myAnsLabel(answers[curIdx])}</b></div>`;
   if(lastCorrect){
     el.innerHTML=`<div class="card">
       <div class="banner" style="background:#e7f7ec;border-color:#b7e4c7;color:#1b7a43">✅ 정답입니다! 잘했어요. 다음 문제로 진행하세요.</div>
@@ -472,9 +484,9 @@ function renderFeedback(){
     </div>`;
     return;
   }
-  const expImg=q.explainImg?`<img class="expimg" src="${q.explainImg}" alt="해설">`:'';
+  const expImg=expImgs(q).length?imgsHtml(expImgs(q),'expimg','해설'):'';
   const expTxt=q.explain?`<div class="explain">💡 ${esc(q.explain)}</div>`:'';
-  const hasExp=q.explain||q.explainImg;
+  const hasExp=q.explain||expImgs(q).length;
   if(!(cfg&&cfg.explain)){
     const hd=lastTimedOut?'⏰ 제한시간이 지나 자동 채점되었어요.':'❌ 틀렸어요.';
     el.innerHTML=`<div class="card"><div class="banner" style="background:#fdecec;border-color:#f5b7b1;color:#c0392b">${hd}</div><div class="qnum">문항 ${curIdx+1} / ${total}</div>${content}${ansLine}${mine}<div class="row" style="margin-top:18px"><button class="btn" onclick="goNext()">${isLast?'✅ 시험 종료 · 최종 제출':'다음 문제로 →'}</button></div></div>`;
@@ -486,8 +498,8 @@ function renderFeedback(){
   }else{
     let ri;
     if(q.type==='short'){ri=`<input class="short-input" value="${esc(retryAns||'')}" oninput="setShortRetry(this.value)" placeholder="정답을 직접 입력" autocomplete="off">`;}
-    else if(q.opts){ri=`<div class="opts">${q.opts.map((o,i)=>`<div class="opt${retryAns===i?' sel':''}" onclick="pickRetry(${i})"><span class="mk">${nlabel(i)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;}
-    else{const n=q.choices||5;ri=`<div class="ansgrid">${Array.from({length:n},(_,i)=>`<button class="ansbtn${retryAns===i?' sel':''}" onclick="pickRetry(${i})">${nlabel(i)}</button>`).join('')}</div>`;}
+    else if(q.opts){const rM=isMultiQ(q);const rHas=i=>rM?(Array.isArray(retryAns)&&retryAns.indexOf(i)>=0):(retryAns===i);ri=`${rM?'<div style="font-size:12px;color:var(--ok);margin-bottom:4px">정답을 모두 선택하세요</div>':''}<div class="opts">${q.opts.map((o,i)=>`<div class="opt${rHas(i)?' sel':''}" onclick="pickRetry(${i})"><span class="mk">${nlabel(i)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;}
+    else{const n=q.choices||5;const rM=isMultiQ(q);const rHas=i=>rM?(Array.isArray(retryAns)&&retryAns.indexOf(i)>=0):(retryAns===i);ri=`${rM?'<div style="font-size:12px;color:var(--ok);margin-bottom:4px">정답을 모두 선택하세요</div>':''}<div class="ansgrid">${Array.from({length:n},(_,i)=>`<button class="ansbtn${rHas(i)?' sel':''}" onclick="pickRetry(${i})">${nlabel(i)}</button>`).join('')}</div>`;}
     retryBox=`<div class="banner" style="margin-top:14px">✍️ 해설을 보고 <b>직접 정답을 입력</b>해 보세요. 정답을 맞춰야 다음으로 진행할 수 있습니다.</div>${ri}<div class="row" style="margin-top:8px"><button class="btn" onclick="checkRetry()">정답 확인</button></div>`;
   }
   const lec=q.lecture?`<a class="lecture-link" href="${esc(q.lecture)}" target="_blank" rel="noopener noreferrer">🎥 관련 강의 보기 (새 창)</a>`:'';
@@ -508,7 +520,7 @@ function renderFeedback(){
     </div>
   </div>`;
 }
-window.pickRetry=function(i){retryAns=i;renderFeedback();};
+window.pickRetry=function(i){const q=curTest.questions[curIdx];if(isMultiQ(q)){let a=Array.isArray(retryAns)?retryAns.slice():[];const p=a.indexOf(i);if(p>=0)a.splice(p,1);else a.push(i);retryAns=a;}else{retryAns=i;}renderFeedback();};
 window.setShortRetry=function(v){retryAns=v;};
 window.checkRetry=function(){
   const q=curTest.questions[curIdx];
@@ -530,15 +542,18 @@ function renderQuestion(){
   const q=curTest.questions[curIdx], total=curTest.questions.length, L='ABCDE';
   const pct=((curIdx+1)/total*100).toFixed(0);
   const locked=qLocked[curIdx];
-  const content=q.img?`<img class="qimg" src="${q.img}" alt="문제 이미지">`:`<div class="qtext">${esc(q.q)}</div>`;
+  const content=qImgs(q).length?imgsHtml(qImgs(q),'qimg','문제 이미지'):`<div class="qtext">${esc(q.q)}</div>`;
   let opts;
+  const isM=isMultiQ(q);
+  const selHas=i=>isM?(Array.isArray(answers[curIdx])&&answers[curIdx].indexOf(i)>=0):(answers[curIdx]===i);
+  const pickHint=isM?'<div style="font-size:13px;color:var(--ok);margin-bottom:6px;font-weight:600">✔ 복수 정답 문항입니다. 정답을 <b>모두</b> 선택하세요.</div>':'';
   if(q.type==='short'){
     opts=`<div style="font-size:13px;color:var(--muted);margin-bottom:6px">정답을 입력하세요 (단답형)</div><input class="short-input" ${locked?'disabled':''} value="${esc(answers[curIdx]||'')}" oninput="setShort(this.value)" placeholder="예: 42" autocomplete="off">`;
   }else if(q.opts){
-    opts=`<div class="opts">${q.opts.map((o,i)=>`<div class="opt${answers[curIdx]===i?' sel':''}" ${locked?'style="opacity:.55;cursor:not-allowed"':`onclick="pick(${i})"`}><span class="mk">${nlabel(i)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;
+    opts=`${pickHint}<div class="opts">${q.opts.map((o,i)=>`<div class="opt${selHas(i)?' sel':''}" ${locked?'style="opacity:.55;cursor:not-allowed"':`onclick="pick(${i})"`}><span class="mk">${nlabel(i)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;
   }else{
     const n=q.choices||5;
-    opts=`<div style="font-size:13px;color:var(--muted);margin-bottom:6px">정답을 선택하세요</div><div class="ansgrid">${Array.from({length:n},(_,i)=>`<button class="ansbtn${answers[curIdx]===i?' sel':''}" ${locked?'disabled style="opacity:.55;cursor:not-allowed"':`onclick="pick(${i})"`}>${nlabel(i)}</button>`).join('')}</div>`;
+    opts=`<div style="font-size:13px;color:var(--muted);margin-bottom:6px">${isM?'정답을 모두 선택하세요 (복수 정답)':'정답을 선택하세요'}</div><div class="ansgrid">${Array.from({length:n},(_,i)=>`<button class="ansbtn${selHas(i)?' sel':''}" ${locked?'disabled style="opacity:.55;cursor:not-allowed"':`onclick="pick(${i})"`}>${nlabel(i)}</button>`).join('')}</div>`;
   }
   const hasLimit=(+q.limit||0)>0;
   const isImmediate=!!(cfg&&cfg.immediate);
@@ -577,15 +592,15 @@ window.submitAll=function(){
   const msg=un>0?`아직 답하지 않은 문항이 ${un}개 있습니다. 그래도 제출할까요?`:'답안을 제출할까요? 제출 후에는 수정할 수 없습니다.';
   if(confirm(msg))submitTest();
 };
-window.pick=function(i){if(qLocked[curIdx])return;answers[curIdx]=i;renderQuestion();};
+window.pick=function(i){if(qLocked[curIdx])return;const q=curTest.questions[curIdx];if(isMultiQ(q)){let a=Array.isArray(answers[curIdx])?answers[curIdx].slice():[];const p=a.indexOf(i);if(p>=0)a.splice(p,1);else a.push(i);answers[curIdx]=a;}else{answers[curIdx]=i;}renderQuestion();};
 window.prevQ=function(){if(curIdx>0){curIdx--;renderQuestion();}};
 window.nextQ=function(){if(curIdx<curTest.questions.length-1){curIdx++;renderQuestion();}};
 function fmtTime(s){s=Math.max(0,s);const m=Math.floor(s/60),x=s%60;return `${String(m).padStart(2,'0')}:${String(x).padStart(2,'0')}`;}
 window.setShort=function(v){if(qLocked[curIdx])return;answers[curIdx]=v;};
 function normShort(s){return String(s==null?'':s).trim().toLowerCase().replace(/\s+/g,'');}
 function acceptsOf(q){return String(q.ansText||'').split(/[,，|]/).map(normShort).filter(Boolean);}
-function isCorrect(q,a){if(q.type==='short'){const v=normShort(a);return v!==''&&acceptsOf(q).includes(v);}return a===q.ans;}
-function unanswered(q,a){return q.type==='short'?(a==null||String(a).trim()===''):(a<0);}
+function isCorrect(q,a){if(q.type==='short'){const v=normShort(a);return v!==''&&acceptsOf(q).includes(v);}const cs=correctSet(q);if(cs.length>1){if(!Array.isArray(a))return false;const ua=a.slice().sort((x,y)=>x-y),cc=cs.slice().sort((x,y)=>x-y);return ua.length===cc.length&&ua.every((v,k)=>v===cc[k]);}return Array.isArray(a)?(a.length===1&&a[0]===cs[0]):(a===cs[0]);}
+function unanswered(q,a){if(q.type==='short')return a==null||String(a).trim()==='';if(Array.isArray(a))return a.length===0;return a==null||a<0;}
 function stopTimer(){if(timerID){clearInterval(timerID);timerID=null;}}
 
 /* ============ SUBMIT + STATS ============ */
@@ -602,7 +617,7 @@ window.submitTest=function(){
   const un=qs.filter((q,i)=>unanswered(q,answers[i])).length;
   const score=Math.round(correct/qs.length*100);
   const result={rid:newRid(),testId:curTest.id,testTitle:curTest.title,student:student.name,sid:student.id,
-    date:new Date().toLocaleString('ko-KR'),score,correct,total:qs.length,un,wrong:wrong,answers:answers.slice(),timeUsed:curTest.minutes*60-timeLeft};
+    date:new Date().toLocaleString('ko-KR'),score,correct,total:qs.length,un,wrong:wrong,answers:answers.slice(),timeUsed:testTotalSec(curTest)-timeLeft};
   const results=loadResults(); results.push(result); saveResults(results); cloudSaveResult(result);
   renderResult(result,results.length-1);
 };
@@ -659,20 +674,21 @@ window.viewReview=function(tid,idx){
   const L='ABCDE';
   const review=test.questions.map((q,i)=>{
     const ua=r.answers[i], ok=isCorrect(q,ua);
-    const content=q.img?`<img class="qimg" src="${q.img}" alt="문제">`:`<div class="qtext" style="font-size:16px">${esc(q.q)}</div>`;
+    const content=qImgs(q).length?imgsHtml(qImgs(q),'qimg','문제'):`<div class="qtext" style="font-size:16px">${esc(q.q)}</div>`;
     let optsHtml, ansLine;
     if(q.type==='short'){
       optsHtml=`<div class="short-ans">정답: <b>${esc(q.ansText||'')}</b></div>`;
       ansLine=`<div style="margin-top:8px;font-size:13px;color:var(--muted)">내 답: ${ua&&String(ua).trim()!==''?esc(ua):'미응답'}</div>`;
     }else if(q.opts){
-      optsHtml=q.opts.map((o,j)=>{let cls=j===q.ans?'correct':(j===ua&&!ok?'wrong':'');return `<div class="opt ${cls}"><span class="mk">${nlabel(j)}</span><span>${esc(o)}</span></div>`;}).join('');
-      ansLine=`<div style="margin-top:8px;font-size:13px;color:var(--muted)">내 답: ${ua>=0?nlabel(ua):'미응답'} · 정답: ${nlabel(q.ans)}</div>`;
+      const cs=correctSet(q);const uaHas=j=>Array.isArray(ua)?ua.indexOf(j)>=0:(ua===j);
+      optsHtml=q.opts.map((o,j)=>{let cls=cs.indexOf(j)>=0?'correct':(uaHas(j)&&!ok?'wrong':'');return `<div class="opt ${cls}"><span class="mk">${nlabel(j)}</span><span>${esc(o)}</span></div>`;}).join('');
+      ansLine=`<div style="margin-top:8px;font-size:13px;color:var(--muted)">내 답: ${myAnsLabel2(ua)} · 정답: ${correctLabels(q)}</div>`;
     }else{
-      const n=q.choices||5;
-      optsHtml=`<div class="ansgrid">${Array.from({length:n},(_,j)=>{let cls=j===q.ans?'correct':(j===ua&&!ok?'wrong':'');return `<button class="ansbtn ${cls}">${nlabel(j)}</button>`;}).join('')}</div>`;
-      ansLine=`<div style="margin-top:8px;font-size:13px;color:var(--muted)">내 답: ${ua>=0?nlabel(ua):'미응답'} · 정답: ${nlabel(q.ans)}</div>`;
+      const n=q.choices||5;const cs=correctSet(q);const uaHas=j=>Array.isArray(ua)?ua.indexOf(j)>=0:(ua===j);
+      optsHtml=`<div class="ansgrid">${Array.from({length:n},(_,j)=>{let cls=cs.indexOf(j)>=0?'correct':(uaHas(j)&&!ok?'wrong':'');return `<button class="ansbtn ${cls}">${nlabel(j)}</button>`;}).join('')}</div>`;
+      ansLine=`<div style="margin-top:8px;font-size:13px;color:var(--muted)">내 답: ${myAnsLabel2(ua)} · 정답: ${correctLabels(q)}</div>`;
     }
-    const expImg=q.explainImg?`<img class="expimg" src="${q.explainImg}" alt="해설">`:'';
+    const expImg=expImgs(q).length?imgsHtml(expImgs(q),'expimg','해설'):'';
     const expTxt=q.explain?`<div class="explain">💡 ${esc(q.explain)}</div>`:'';
     const lec=q.lecture?`<a class="lecture-link" href="${esc(q.lecture)}" target="_blank" rel="noopener noreferrer">🎥 관련 강의 보기</a>`:'';
     return `<div class="review-q">
@@ -796,7 +812,7 @@ function renderAdmin(){
   let body='';
   if(adminTab==='list'){
     const list=tests.map(t=>`<div class="testitem">
-      <div style="flex:1"><h3>${esc(t.title)}</h3><div class="meta">${t.questions.length}문항 · ${t.minutes}분 · ${esc(t.subject)} · <span style="color:var(--brand);font-weight:600">${modeLabel(t.mode||'learning')}</span></div>
+      <div style="flex:1"><h3>${esc(t.title)}</h3><div class="meta">${t.questions.length}문항 · ${fmtTestTime(t)} · ${esc(t.subject)} · <span style="color:var(--brand);font-weight:600">${modeLabel(t.mode||'learning')}</span></div>
         <div class="linkbox"><span>🔗</span><input readonly value="${esc(buildLink(t.id))}" onclick="this.select()">
           <button class="btn sm" onclick="copyLink('${t.id}')">복사</button></div>
       </div>
@@ -975,7 +991,7 @@ window.printTest=function(tid){
   const t=loadTests().find(x=>x.id===tid);
   if(!t){alert('시험을 찾을 수 없습니다.');return;}
   const qs=t.questions.map((q,i)=>{
-    const content=q.img?`<img class="qimg" src="${q.img}">`:`<div class="qtext">${esc(q.q||'')}</div>`;
+    const content=qImgs(q).length?imgsHtml(qImgs(q),'qimg',''):`<div class="qtext">${esc(q.q||'')}</div>`;
     let opts='';
     if(q.type!=='short'&&q.opts){opts=`<div class="opts">${q.opts.map((o,j)=>`<div class="opt"><span class="mk">${nlabel(j)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;}
     else if(q.type!=='short'){const n=q.choices||5;opts=`<div class="ansgrid">${Array.from({length:n},(_,j)=>`<button class="ansbtn">${nlabel(j)}</button>`).join('')}</div>`;}
@@ -983,14 +999,14 @@ window.printTest=function(tid){
     const lim=(+q.limit||0)>0?` <span class="pill blue">제한 ${Math.floor(q.limit/60)}분 ${q.limit%60}초</span>`:'';
     return `<div class="review-q"><div class="rq">문항 ${i+1}${lim}</div>${content}${opts}</div>`;
   }).join('');
-  const key=t.questions.map((q,i)=>{const a=q.type==='short'?esc(q.ansText||''):nlabel(q.ans);return `<tr><td style="text-align:center">${i+1}</td><td>${a}</td><td>${esc(q.explain||'')}</td></tr>`;}).join('');
+  const key=t.questions.map((q,i)=>{const a=q.type==='short'?esc(q.ansText||''):correctLabels(q);return `<tr><td style="text-align:center">${i+1}</td><td>${a}</td><td>${esc(q.explain||'')}</td></tr>`;}).join('');
   el.innerHTML=`<div class="card">
     <div class="row no-print" style="margin-bottom:14px">
       <button class="btn" onclick="window.print()">🖨️ PDF로 저장 / 인쇄</button>
       <button class="btn ghost" onclick="adminTab='list';renderAdmin()">← 돌아가기</button>
     </div>
     <h2>${esc(t.title)}</h2>
-    <p class="sub">아신수학전문학원 온라인 테스트 · ${esc(t.subject)} · ${t.questions.length}문항 · ${t.minutes}분</p>
+    <p class="sub">아신수학전문학원 온라인 테스트 · ${esc(t.subject)} · ${t.questions.length}문항 · ${fmtTestTime(t)}</p>
     <div style="margin:6px 0 16px;font-size:13px;color:var(--muted)">이름: __________________ · 학생 번호: __________________</div>
     ${qs}
     <h2 style="margin-top:22px;page-break-before:always">✅ 정답 & 해설</h2>
@@ -1006,9 +1022,14 @@ window.copyLink=function(tid){
 function readFileToDataURL(file,cb){const r=new FileReader();r.onload=e=>cb(e.target.result);r.onerror=()=>alert('이미지를 읽을 수 없습니다.');r.readAsDataURL(file);}
 window.onQFile=function(inp,i){const f=inp.files[0];if(!f)return;readFileToDataURL(f,d=>openCropper('q',i,d));inp.value='';};
 window.onExpFile=function(inp,i){const f=inp.files[0];if(!f)return;readFileToDataURL(f,d=>openCropper('exp',i,d));inp.value='';};
-window.clearQImg=function(i){editData.questions[i].img='';renderEdit();};
-window.clearExpImg=function(i){editData.questions[i].explainImg='';renderEdit();};
-window.setType=function(i,t){editData.questions[i].type=t;if(t==='choice'){editData.questions[i].choices=5;if(editData.questions[i].ans==null||editData.questions[i].ans<0)editData.questions[i].ans=0;}renderEdit();};
+window.clearQImg=function(i){const q=editData.questions[i];q.img='';q.imgs=[];renderEdit();};
+window.clearExpImg=function(i){const q=editData.questions[i];q.explainImg='';q.explainImgs=[];renderEdit();};
+window.rmQImg=function(i,k){const q=editData.questions[i];const a=qImgs(q);a.splice(k,1);q.imgs=a;q.img='';renderEdit();};
+window.rmExpImg=function(i,k){const q=editData.questions[i];const a=expImgs(q);a.splice(k,1);q.explainImgs=a;q.explainImg='';renderEdit();};
+window.moveQImg=function(i,k,dir){const q=editData.questions[i];const a=qImgs(q);const nk=k+dir;if(nk<0||nk>=a.length)return;const tmp=a[k];a[k]=a[nk];a[nk]=tmp;q.imgs=a;q.img='';renderEdit();};
+window.moveExpImg=function(i,k,dir){const q=editData.questions[i];const a=expImgs(q);const nk=k+dir;if(nk<0||nk>=a.length)return;const tmp=a[k];a[k]=a[nk];a[nk]=tmp;q.explainImgs=a;q.explainImg='';renderEdit();};
+window.setType=function(i,t){editData.questions[i].type=t;if(t==='choice'){editData.questions[i].choices=5;if(editData.questions[i].ans==null||editData.questions[i].ans<0)editData.questions[i].ans=0;if(!Array.isArray(editData.questions[i].ansMulti)||!editData.questions[i].ansMulti.length)editData.questions[i].ansMulti=[editData.questions[i].ans];}renderEdit();};
+window.toggleAns=function(i,j){const q=editData.questions[i];let cs=correctSet(q);const p=cs.indexOf(j);if(p>=0){if(cs.length>1)cs.splice(p,1);}else cs.push(j);cs=cs.filter((v,x)=>cs.indexOf(v)===x).sort((a,b)=>a-b);q.ansMulti=cs;q.ans=cs[0];renderEdit();};
 
 /* ---- Cropper ---- */
 let crop={kind:null,idx:0,drag:false,sx:0,sy:0,rect:null};
@@ -1054,7 +1075,7 @@ function wholeToDataURL(){
   cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
   return cv.toDataURL('image/jpeg',0.85);
 }
-function assignCrop(d){if(!d)return;if(crop.kind==='q')editData.questions[crop.idx].img=d;else editData.questions[crop.idx].explainImg=d;closeCrop();renderEdit();}
+function assignCrop(d){if(!d)return;const q=editData.questions[crop.idx];if(crop.kind==='q'){q.imgs=qImgs(q);q.imgs.push(d);q.img='';}else{q.explainImgs=expImgs(q);q.explainImgs.push(d);q.explainImg='';}closeCrop();renderEdit();}
 window.applyCrop=function(){const d=cropToDataURL();if(!d){alert('먼저 자를 영역을 드래그로 선택하세요.');return;}assignCrop(d);};
 window.applyWhole=function(){assignCrop(wholeToDataURL());};
 window.closeCrop=function(){window.onmousemove=null;window.onmouseup=null;document.getElementById('cropRoot').innerHTML='';};
@@ -1075,7 +1096,7 @@ function customToggles(){
   return '<div class="banner" style="font-size:12px">원하는 요소를 켜세요. (예: 즉시 채점+해설 생략+전체 시간 제한 등 자유 조합)</div>'+rows.map(function(r){return '<label class="row" style="gap:8px;align-items:center;cursor:pointer;margin:4px 0"><input type="checkbox" '+(c[r[0]]?'checked':'')+' onchange="setCustom(\''+r[0]+'\',this.checked)"> <span>'+r[1]+'</span></label>';}).join('');
 }
 window.setCustom=function(k,v){editData.custom=editData.custom||{};editData.custom[k]=v;};
-function blankQ(){return{img:'',type:'choice',choices:5,ans:0,ansText:'',explain:'',explainImg:'',lecture:'',limit:0};}
+function blankQ(){return{img:'',imgs:[],type:'choice',choices:5,ans:0,ansMulti:[0],ansText:'',explain:'',explainImg:'',explainImgs:[],lecture:'',limit:0};}
 window.newTest=function(){editData={id:'t'+Date.now(),title:'',subject:'',minutes:10,mode:'learning',questions:[blankQ()]};adminTab='edit';renderAdmin();};
 window.addLecture=function(){
   const g=document.getElementById('lgrade').value.trim();
@@ -1094,7 +1115,7 @@ window.delLecture=function(i){
   if(i<0||i>=L.length)return;
   if(!confirm('이 강의를 삭제할까요?'))return;
   L.splice(i,1); saveLectures(L); renderAdmin();
-};window.editTest=function(tid){editData=JSON.parse(JSON.stringify(loadTests().find(t=>t.id===tid)));if(!editData.mode)editData.mode='learning';editData.questions.forEach(q=>{if(q.explain==null)q.explain='';if(q.lecture==null)q.lecture='';if(q.explainImg==null)q.explainImg='';if(q.img==null)q.img='';if(q.ansText==null)q.ansText='';if(q.limit==null)q.limit=0;if(!q.type)q.type=q.opts?'choice':'choice';if(q.type==='choice'&&!q.choices&&!q.opts)q.choices=5;});adminTab='edit';renderAdmin();};
+};window.editTest=function(tid){editData=JSON.parse(JSON.stringify(loadTests().find(t=>t.id===tid)));if(!editData.mode)editData.mode='learning';editData.questions.forEach(q=>{if(q.explain==null)q.explain='';if(q.lecture==null)q.lecture='';if(q.explainImg==null)q.explainImg='';if(q.img==null)q.img='';if(q.ansText==null)q.ansText='';if(q.limit==null)q.limit=0;if(!Array.isArray(q.imgs))q.imgs=q.img?[q.img]:[];if(!Array.isArray(q.explainImgs))q.explainImgs=q.explainImg?[q.explainImg]:[];if(!Array.isArray(q.ansMulti)||!q.ansMulti.length)q.ansMulti=(q.ans!=null?[q.ans]:[0]);if(!q.type)q.type=q.opts?'choice':'choice';if(q.type==='choice'&&!q.choices&&!q.opts)q.choices=5;});adminTab='edit';renderAdmin();};
 window.delTest=function(tid){if(!confirm('이 시험을 삭제하시겠습니까?'))return;saveTests(loadTests().filter(t=>t.id!==tid));renderAdmin();};
 function renderEdit(){
   if(!editData)return;
@@ -1103,18 +1124,19 @@ function renderEdit(){
     const legacy=!!q.opts;
     const type=q.type||(legacy?'choice':'choice');
     const n=q.opts?q.opts.length:(q.choices||5);
+    const qimgs=qImgs(q);
     const qImgBox=legacy?`<label>문제(텍스트)</label><input value="${esc(q.q||'')}" oninput="editData.questions[${i}].q=this.value">`
-      :(q.img?`<img class="thumb" src="${q.img}"><button class="btn ghost sm" style="margin-top:6px" onclick="clearQImg(${i})">문제 이미지 다시 선택/삭제</button>`
-        :`<label class="uploader" for="qf${i}">📂 문제 이미지 불러오기 → 영역 드래그 선택</label><input id="qf${i}" type="file" accept="image/*" style="display:none" onchange="onQFile(this,${i})">`);
+      :`${qimgs.map((s,k)=>`<div class="row" style="align-items:center;gap:6px;margin:4px 0"><span style="font-size:12px;color:var(--muted);min-width:40px">${k+1}번</span><img class="thumb" src="${s}" style="max-height:110px"><button class="btn ghost sm" onclick="moveQImg(${i},${k},-1)">↑</button><button class="btn ghost sm" onclick="moveQImg(${i},${k},1)">↓</button><button class="btn ghost sm" onclick="rmQImg(${i},${k})">🗑</button></div>`).join('')}<label class="uploader" for="qf${i}">📂 ${qimgs.length?'문제 이미지 추가 (여러 장 = 하나의 문제로 순서대로 표시)':'문제 이미지 불러오기'} → 영역 드래그 선택</label><input id="qf${i}" type="file" accept="image/*" style="display:none" onchange="onQFile(this,${i})">`;
     const typeSeg=legacy?'':`<label>정답 유형</label><div class="seg"><button class="${type==='choice'?'on':''}" onclick="setType(${i},'choice')">5지선다형</button><button class="${type==='short'?'on':''}" onclick="setType(${i},'short')">단답형</button></div>`;
     let ansBox;
     if(type==='short'){
       ansBox=`<label>정답 (단답형 · 여러 개는 쉼표로 구분)</label><input placeholder="예: 42, 사십이" value="${esc(q.ansText||'')}" oninput="editData.questions[${i}].ansText=this.value">`;
     }else{
-      ansBox=`<label>정답 (5지선다형)</label><div class="ansgrid">${Array.from({length:5},(_,j)=>`<button class="ansbtn${q.ans===j?' sel':''}" onclick="editData.questions[${i}].ans=${j};renderEdit()">${nlabel(j)}</button>`).join('')}</div>`;
+      const cs=correctSet(q);
+      ansBox=`<label>정답 (5지선다형 · 복수 정답 가능)</label><div class="banner" style="font-size:12px">정답을 여러 개 골라두면 <b>복수 정답</b> 문항이 되며, 학생은 지정된 정답을 <b>모두 정확히</b> 선택해야 정답으로 인정됩니다.</div><div class="ansgrid">${Array.from({length:5},(_,j)=>`<button class="ansbtn${cs.indexOf(j)>=0?' sel':''}" onclick="toggleAns(${i},${j})">${nlabel(j)}</button>`).join('')}</div>`;
     }
-    const expImgBox=q.explainImg?`<img class="thumb" src="${q.explainImg}"><button class="btn ghost sm" style="margin-top:6px" onclick="clearExpImg(${i})">해설 이미지 다시 선택/삭제</button>`
-      :`<label class="uploader" for="ef${i}">🖼️ 해설 이미지 불러오기 → 영역 선택 (선택사항)</label><input id="ef${i}" type="file" accept="image/*" style="display:none" onchange="onExpFile(this,${i})">`;
+    const eimgs=expImgs(q);
+    const expImgBox=`${eimgs.map((s,k)=>`<div class="row" style="align-items:center;gap:6px;margin:4px 0"><span style="font-size:12px;color:var(--muted);min-width:40px">${k+1}번</span><img class="thumb" src="${s}" style="max-height:110px"><button class="btn ghost sm" onclick="moveExpImg(${i},${k},-1)">↑</button><button class="btn ghost sm" onclick="moveExpImg(${i},${k},1)">↓</button><button class="btn ghost sm" onclick="rmExpImg(${i},${k})">🗑</button></div>`).join('')}<label class="uploader" for="ef${i}">🖼️ ${eimgs.length?'해설 이미지 추가 (여러 장 순서대로)':'해설 이미지 불러오기'} → 영역 선택 (선택사항)</label><input id="ef${i}" type="file" accept="image/*" style="display:none" onchange="onExpFile(this,${i})">`;
     return `<div class="qedit">
       <div class="row between"><b>문항 ${i+1}</b><button class="btn ghost sm" onclick="rmQ(${i})">🗑</button></div>
       ${qImgBox}
@@ -1131,7 +1153,8 @@ function renderEdit(){
     <div class="banner">💡 문제/해설 이미지를 불러온 뒤 <b>여러 문제 중 원하는 부분을 박스로 드래그</b>하면 그 영역만 잘라서 올라갑니다. 정답은 5지선다형 또는 단답형으로 입력합니다.</div>
     <label>시험 제목</label><input value="${esc(editData.title)}" oninput="editData.title=this.value">
     <label>과목</label><input value="${esc(editData.subject)}" oninput="editData.subject=this.value">
-    <label>제한 시간(분)</label><input type="number" min="1" value="${editData.minutes}" oninput="editData.minutes=+this.value">
+    <label>전체 제한시간(분) <span style="color:var(--muted);font-size:12px">— 문항별 제한시간이 없을 때 사용</span></label><input type="number" min="1" value="${editData.minutes}" oninput="editData.minutes=+this.value">
+    <div class="banner" style="background:#eef6ff;border-color:#b3d4fc;font-size:13px;margin-top:6px">⏱️ 문항별 제한시간 합계: <b id="autoTotal">${fmtSec(sumLimitSec(editData))}</b><span id="autoTotalNote">${sumLimitSec(editData)>0?' · 합계가 있으므로 전체 시험 시간은 이 값으로 자동 적용됩니다.':' · 합계가 0이면 위 전체 제한시간이 사용됩니다.'}</span></div>
     <label>시험 방식</label>
     <select onchange="editData.mode=this.value;renderEdit()" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">
       <option value="learning" ${editData.mode==='learning'?'selected':''}>학습형 — 문항별 제출·즉시 채점, 오답시 해설·강의 후 정답재입력·이해확인</option>
@@ -1153,6 +1176,8 @@ window.setQLimit=function(i,unit,val){
   const v=Math.max(0,parseInt(val,10)||0);
   if(unit==='m')m=v;else s=Math.min(59,v);
   q.limit=m*60+s;
+  const at=document.getElementById('autoTotal');if(at)at.textContent=fmtSec(sumLimitSec(editData));
+  const nt=document.getElementById('autoTotalNote');if(nt)nt.textContent=sumLimitSec(editData)>0?' · 합계가 있으므로 전체 시험 시간은 이 값으로 자동 적용됩니다.':' · 합계가 0이면 위 전체 제한시간이 사용됩니다.';
 };
 window.rmQ=function(i){if(editData.questions.length<=1){alert('최소 1문항 필요');return;}editData.questions.splice(i,1);renderEdit();};
 window.saveEdit=function(){
@@ -1160,7 +1185,7 @@ window.saveEdit=function(){
   if(!t.title){alert('시험 제목을 입력하세요.');return;}
   for(let k=0;k<t.questions.length;k++){const q=t.questions[k];
     if(q.opts){if(!q.q||!q.q.trim()){alert(`${k+1}번 문제가 비어있어요.`);return;}}
-    else if(!q.img){alert(`${k+1}번 문제 이미지를 올려주세요.`);return;}
+    else if(!qImgs(q).length){alert(`${k+1}번 문제 이미지를 올려주세요.`);return;}
     if((q.type==='short')&&(!q.ansText||!q.ansText.trim())){alert(`${k+1}번 단답형 정답을 입력해주세요.`);return;}
   }
   const list=loadTests(); const idx=list.findIndex(x=>x.id===t.id);
