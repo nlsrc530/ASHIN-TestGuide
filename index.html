@@ -232,7 +232,9 @@ function setPw(p){localStorage.setItem(LS_ADMINPW,hashPw(p));}
 let CLOUD=null, cloudOn=false, curView='login';
 function sanId(s){let x=encodeURIComponent(String(s));x=x.replace(/[.#$\[\]\/*]/g,'_');return x||'_';}
 function newRid(){return 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
-function cloudSaveTests(list){if(!cloudOn)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'config','tests'),{data:list}).catch(function(){});}catch(e){}}
+function cloudSaveTests(list){if(!cloudOn)return;try{(list||[]).forEach(function(t){if(t&&t.id)CLOUD.setDoc(CLOUD.doc(CLOUD.db,'tests',sanId(t.id)),t).catch(function(){});});}catch(e){}}
+function cloudSaveTest(t){if(!cloudOn||!t||!t.id)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'tests',sanId(t.id)),t).catch(function(){});}catch(e){}}
+function cloudDelTest(id){if(!cloudOn||!id)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'tests',sanId(id))).catch(function(){});}catch(e){}}
 function cloudSaveLectures(list){if(!cloudOn)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'config','lectures'),{data:list}).catch(function(){});}catch(e){}}
 function cloudSaveStudent(s){if(!cloudOn||!s||!s.sid)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'students',sanId(s.sid)),{sid:s.sid,name:s.name||'',pw:s.pw||''}).catch(function(){});}catch(e){}}
 function cloudDelStudent(sid){if(!cloudOn)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'students',sanId(sid))).catch(function(){});}catch(e){}}
@@ -1063,17 +1065,17 @@ function cropToDataURL(){
   let r=crop.rect;
   if(!r||r.w<8||r.h<8)return null;
   const sx=r.x*scale, sy=r.y*scale, sw=r.w*scale, sh=r.h*scale;
-  const outW=Math.min(sw,1100), k=outW/sw;
+  const outW=Math.min(sw,1000), k=outW/sw;
   const cv=document.createElement('canvas');cv.width=Math.round(sw*k);cv.height=Math.round(sh*k);
   cv.getContext('2d').drawImage(img,sx,sy,sw,sh,0,0,cv.width,cv.height);
-  return cv.toDataURL('image/jpeg',0.85);
+  return cv.toDataURL('image/jpeg',0.8);
 }
 function wholeToDataURL(){
   const img=document.getElementById('cimg');
-  const k=Math.min(1,1100/img.naturalWidth);
+  const k=Math.min(1,1000/img.naturalWidth);
   const cv=document.createElement('canvas');cv.width=Math.round(img.naturalWidth*k);cv.height=Math.round(img.naturalHeight*k);
   cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
-  return cv.toDataURL('image/jpeg',0.85);
+  return cv.toDataURL('image/jpeg',0.8);
 }
 function assignCrop(d){if(!d)return;const q=editData.questions[crop.idx];if(crop.kind==='q'){q.imgs=qImgs(q);q.imgs.push(d);q.img='';}else{q.explainImgs=expImgs(q);q.explainImgs.push(d);q.explainImg='';}closeCrop();renderEdit();}
 window.applyCrop=function(){const d=cropToDataURL();if(!d){alert('먼저 자를 영역을 드래그로 선택하세요.');return;}assignCrop(d);};
@@ -1116,7 +1118,7 @@ window.delLecture=function(i){
   if(!confirm('이 강의를 삭제할까요?'))return;
   L.splice(i,1); saveLectures(L); renderAdmin();
 };window.editTest=function(tid){editData=JSON.parse(JSON.stringify(loadTests().find(t=>t.id===tid)));if(!editData.mode)editData.mode='learning';editData.questions.forEach(q=>{if(q.explain==null)q.explain='';if(q.lecture==null)q.lecture='';if(q.explainImg==null)q.explainImg='';if(q.img==null)q.img='';if(q.ansText==null)q.ansText='';if(q.limit==null)q.limit=0;if(!Array.isArray(q.imgs))q.imgs=q.img?[q.img]:[];if(!Array.isArray(q.explainImgs))q.explainImgs=q.explainImg?[q.explainImg]:[];if(!Array.isArray(q.ansMulti)||!q.ansMulti.length)q.ansMulti=(q.ans!=null?[q.ans]:[0]);if(!q.type)q.type=q.opts?'choice':'choice';if(q.type==='choice'&&!q.choices&&!q.opts)q.choices=5;});adminTab='edit';renderAdmin();};
-window.delTest=function(tid){if(!confirm('이 시험을 삭제하시겠습니까?'))return;saveTests(loadTests().filter(t=>t.id!==tid));renderAdmin();};
+window.delTest=function(tid){if(!confirm('이 시험을 삭제하시겠습니까?'))return;saveTests(loadTests().filter(t=>t.id!==tid));cloudDelTest(tid);renderAdmin();};
 function renderEdit(){
   if(!editData)return;
   const L='ABCDE';
@@ -1164,12 +1166,12 @@ function renderEdit(){
     </select>
     <div class="banner" style="font-size:12px">${editData.mode==='timed'?'⏱️ 시간형은 위 <b>제한 시간(분)</b>이 전체 시험 시간이며, 문항을 자유롭게 오갈 수 있습니다. 종료 1분 전 예고가 뜨고, 전체 시간이 지나면 자동 제출되며 조기 종료는 할 수 없습니다.':(editData.mode==='classic'?'🗂️ 기본형은 문항을 자유롭게 오가며 풀고, 문항별 제한시간이 지나면 해당 문항이 잠깁니다.':(editData.mode==='custom'?'🧩 선택형은 아래 요소를 자유롭게 조합해 시험을 구성합니다.':'🎓 학습형은 문항마다 제출·채점하며 틀리거나 시간 초과 시 해설·강의를 보여준 뒤 정답을 다시 입력하고 이해해야 다음으로 진행합니다.'))}</div>
     ${editData.mode==='custom'?customToggles():''}
-    <h2 style="margin-top:22px">문항 목록</h2>${qs}
+    <div class="row between" style="margin-top:22px;align-items:center"><h2 style="margin:0">문항 목록 (총 ${editData.questions.length}문항)</h2><button class="btn sm" onclick="addQ()">➕ 문항 추가</button></div>${qs}
     <button class="btn ghost" style="margin-top:10px" onclick="addQ()">➕ 문항 추가</button>
     <div class="row" style="margin-top:20px"><button class="btn" onclick="saveEdit()">💾 저장</button><button class="btn ghost" onclick="adminTab='list';renderAdmin()">취소</button></div>
   </div>`;
 }
-window.addQ=function(){editData.questions.push(blankQ());renderEdit();};
+window.addQ=function(){editData.questions.push(blankQ());renderEdit();setTimeout(function(){try{const cards=document.querySelectorAll('.qedit');const last=cards[cards.length-1];if(last){last.scrollIntoView({behavior:'smooth',block:'center'});last.style.transition='box-shadow .3s';last.style.boxShadow='0 0 0 3px var(--brand)';setTimeout(function(){last.style.boxShadow='';},1200);}}catch(e){}},60);};
 window.setQLimit=function(i,unit,val){
   const q=editData.questions[i];const cur=+q.limit||0;
   let m=Math.floor(cur/60),s=cur%60;
@@ -1320,9 +1322,9 @@ window.__cloudReady=async function(fs){
   CLOUD=fs; cloudOn=true;
   const {db,doc,setDoc,deleteDoc,collection,onSnapshot,getDocs,getDoc}=fs;
   try{
-    const tSnap=await getDoc(doc(db,'config','tests'));
-    if(tSnap.exists()&&tSnap.data().data){localStorage.setItem(LS_TESTS,JSON.stringify(tSnap.data().data));}
-    else{cloudSaveTests(loadTests());}
+    const tSnap=await getDocs(collection(db,'tests'));
+    if(!tSnap.empty){const arr=[];tSnap.forEach(d=>arr.push(d.data()));arr.sort((a,b)=>String(a.id||'').localeCompare(String(b.id||'')));localStorage.setItem(LS_TESTS,JSON.stringify(arr));}
+    else{let migrated=false;try{const old=await getDoc(doc(db,'config','tests'));if(old.exists()&&old.data().data&&old.data().data.length){const arr=old.data().data;localStorage.setItem(LS_TESTS,JSON.stringify(arr));arr.forEach(t=>cloudSaveTest(t));migrated=true;}}catch(e){}if(!migrated){const loc=loadTests();loc.forEach(t=>cloudSaveTest(t));}}
     const lSnap=await getDoc(doc(db,'config','lectures'));
     if(lSnap.exists()&&lSnap.data().data){localStorage.setItem(LS_LECTURES,JSON.stringify(lSnap.data().data));}
     else{cloudSaveLectures(loadLectures());}
@@ -1337,7 +1339,7 @@ window.__cloudReady=async function(fs){
     else{const loc=getUsageStore();Object.keys(loc).forEach(k=>cloudSaveUsage(k,loc[k]));}
   }catch(e){console.warn('cloud init',e);cloudOn=false;}
   try{
-    onSnapshot(doc(db,'config','tests'),d=>{if(d.exists()&&d.data().data)applyTestsSnap(d.data().data);});
+    onSnapshot(collection(db,'tests'),qs=>{const arr=[];qs.forEach(d=>arr.push(d.data()));arr.sort((a,b)=>String(a.id||'').localeCompare(String(b.id||'')));applyTestsSnap(arr);});
     onSnapshot(doc(db,'config','lectures'),d=>{if(d.exists()&&d.data().data)applyLecturesSnap(d.data().data);});
     onSnapshot(collection(db,'students'),qs=>{const m={};qs.forEach(d=>{const v=d.data();if(v.sid)m[v.sid]=v;});applyStudentsSnap(m);});
     onSnapshot(collection(db,'results'),qs=>{const arr=[];qs.forEach(d=>arr.push(d.data()));arr.sort((a,b)=>(a.date||'').localeCompare(b.date||''));applyResultsSnap(arr);});
