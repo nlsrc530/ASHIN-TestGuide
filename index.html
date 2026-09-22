@@ -176,6 +176,9 @@ const SEED=[
 
 function loadTests(){try{const d=JSON.parse(localStorage.getItem(LS_TESTS));return d&&d.length?d:SEED;}catch(e){return SEED;}}
 function saveTests(t){localStorage.setItem(LS_TESTS,JSON.stringify(t));cloudSaveTests(t);}
+const LS_LECTURES='acad_lectures_v1';
+function loadLectures(){try{return JSON.parse(localStorage.getItem(LS_LECTURES))||[];}catch(e){return[];}}
+function saveLectures(l){localStorage.setItem(LS_LECTURES,JSON.stringify(l));cloudSaveLectures(l);}
 function loadResults(){try{return JSON.parse(localStorage.getItem(LS_RESULTS))||[];}catch(e){return[];}}
 function saveResults(r){localStorage.setItem(LS_RESULTS,JSON.stringify(r));}
 const LS_STUDENTS='acad_students_v2';
@@ -191,10 +194,13 @@ function getStuTrash(){try{return JSON.parse(localStorage.getItem(LS_STU_TRASH))
 function saveStuTrash(t){localStorage.setItem(LS_STU_TRASH,JSON.stringify(t));}
 
 let student=null, tests=loadTests();
-let curTest=null, curIdx=0, answers=[], timerID=null, timeLeft=0, qRemain=[], qLocked=[], reviewMode=false;
+let curTest=null, curIdx=0, answers=[], timerID=null, timeLeft=0, qRemain=[], qLocked=[], reviewMode=false, wrongList=[], lastCorrect=false, lastTimedOut=false, curMode='learning', cfg=null, retryAns=null, retryOK=false;
 let adminTab='list', editData=null, entryTestId=null, selectedStudentIdxs=[];
 const LS_ADMINPW='acad_adminpw_v2';
 let adminAuthed=false;
+const LS_ADMINSESS='acad_adminsess_v1';
+function setAdminSess(on){try{if(on)localStorage.setItem(LS_ADMINSESS,'1');else localStorage.removeItem(LS_ADMINSESS);}catch(e){}}
+function hasAdminSess(){try{return localStorage.getItem(LS_ADMINSESS)==='1';}catch(e){return false;}}
 let loginTime=0;
 const LS_USAGE='acad_usage_v2';
 function usageKey(s){return (s?s.sid:'')+'|'+(s?s.name:'');}
@@ -215,14 +221,16 @@ let CLOUD=null, cloudOn=false, curView='login';
 function sanId(s){let x=encodeURIComponent(String(s));x=x.replace(/[.#$\[\]\/*]/g,'_');return x||'_';}
 function newRid(){return 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
 function cloudSaveTests(list){if(!cloudOn)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'config','tests'),{data:list}).catch(function(){});}catch(e){}}
+function cloudSaveLectures(list){if(!cloudOn)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'config','lectures'),{data:list}).catch(function(){});}catch(e){}}
 function cloudSaveStudent(s){if(!cloudOn||!s||!s.sid)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'students',sanId(s.sid)),{sid:s.sid,name:s.name||'',pw:s.pw||''}).catch(function(){});}catch(e){}}
 function cloudDelStudent(sid){if(!cloudOn)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'students',sanId(sid))).catch(function(){});}catch(e){}}
 function cloudSaveResult(r){if(!cloudOn||!r||!r.rid)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'results',r.rid),r).catch(function(){});}catch(e){}}
 function cloudDelResult(rid){if(!cloudOn||!rid)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'results',rid)).catch(function(){});}catch(e){}}
 function cloudSaveUsage(key,entry){if(!cloudOn)return;try{CLOUD.setDoc(CLOUD.doc(CLOUD.db,'usage',sanId(key)),{key:key,entry:entry}).catch(function(){});}catch(e){}}
 function cloudDelUsage(key){if(!cloudOn)return;try{CLOUD.deleteDoc(CLOUD.doc(CLOUD.db,'usage',sanId(key))).catch(function(){});}catch(e){}}
-function refreshView(){try{if(curView==='login')viewLogin();else if(curView==='home'){if(student)viewHome();}else if(curView==='results'){if(student)viewMyResults();}else if(curView==='admin'){if(adminAuthed)renderAdmin();}}catch(e){}}
+function refreshView(){try{if(curView==='login')viewLogin();else if(curView==='home'){if(student)viewHome();}else if(curView==='tests'){if(student)viewTests();}else if(curView==='lectures'){if(student)viewLectures();}else if(curView==='results'){if(student)viewMyResults();}else if(curView==='admin'){if(adminAuthed)renderAdmin();}}catch(e){}}
 function applyTestsSnap(list){localStorage.setItem(LS_TESTS,JSON.stringify(list&&list.length?list:SEED));tests=loadTests();refreshView();}
+function applyLecturesSnap(list){localStorage.setItem(LS_LECTURES,JSON.stringify(list||[]));refreshView();}
 function applyStudentsSnap(map){localStorage.setItem(LS_STUDENTS,JSON.stringify(map));refreshView();}
 function applyResultsSnap(arr){localStorage.setItem(LS_RESULTS,JSON.stringify(arr));refreshView();}
 function applyUsageSnap(map){localStorage.setItem(LS_USAGE,JSON.stringify(map));refreshView();}
@@ -283,22 +291,67 @@ window.logout=function(){
 /* ============ HOME ============ */
 function viewHome(){
   curView='home';
-  stopTimer(); tests=loadTests();
-  const done=loadResults();
-  const isDone=tid=>done.some(r=>r.testId===tid&&r.sid===student.id&&r.student===student.name);
-  const list=tests.map(t=>{const d=isDone(t.id);return `<div class="testitem" onclick="startTest('${t.id}')">
-    <div><h3>${esc(t.title)}</h3><div class="meta">${t.questions.length}문항 · 제한시간 ${t.minutes}분${d?' · <span style="color:var(--ok);font-weight:700">✔ 응시 완료(문제 확인만 가능)</span>':''}</div></div>
-    <span class="pill blue">${esc(t.subject)}</span></div>`;}).join('');
+  stopTimer();
   el.innerHTML=`<div class="card">
     <div class="row between">
       <div><h2>안녕하세요, ${esc(student.name)}님 👋</h2>
       <p class="sub" style="margin:4px 0 0">학번 ${esc(student.id)} · ⏱ 이용시간 <b id="sessClock">${fmtDur(sessionElapsed())}</b></p></div>
       <button class="btn ghost sm" onclick="logout()">로그아웃</button>
     </div>
-    <div class="testlist">${list||'<div class="empty">등록된 시험이 없습니다.</div>'}</div>
+    <div class="banner">원하는 메뉴를 선택하세요.</div>
+    <div class="row" style="gap:14px;margin-top:8px;flex-wrap:wrap">
+      <button class="btn" style="flex:1;min-width:160px;padding:26px 12px;font-size:17px" onclick="viewTests()">📝 TestGuide 평가</button>
+      <button class="btn ghost" style="flex:1;min-width:160px;padding:26px 12px;font-size:17px" onclick="viewLectures()">🎥 TestGuide 강의</button>
+    </div>
     <div class="row" style="margin-top:18px"><button class="btn ghost sm" onclick="viewMyResults()">📊 내 성적 · 평균 보기</button></div>
   </div>`;
 }
+window.viewTests=function(){
+  curView='tests';
+  stopTimer(); tests=loadTests();
+  const done=loadResults();
+  const isDone=tid=>done.some(r=>r.testId===tid&&r.sid===student.id&&r.student===student.name);
+  const list=tests.map(t=>{const d=isDone(t.id);return `<div class="testitem" onclick="startTest('${t.id}')">
+    <div><h3>${esc(t.title)}</h3><div class="meta">${t.questions.length}문항 · 제한시간 ${t.minutes}분 · <span style="color:var(--brand);font-weight:600">${modeLabel(t.mode||'learning')}</span>${d?' · <span style="color:var(--ok);font-weight:700">✔ 응시 완료(문제 확인만 가능)</span>':''}</div></div>
+    <span class="pill blue">${esc(t.subject)}</span></div>`;}).join('');
+  el.innerHTML=`<div class="card">
+    <div class="row between">
+      <div><h2>📝 TestGuide 평가</h2>
+      <p class="sub" style="margin:4px 0 0">응시할 시험을 선택하세요.</p></div>
+      <button class="btn ghost sm" onclick="viewHome()">🏠 메뉴</button>
+    </div>
+    <div class="testlist">${list||'<div class="empty">등록된 시험이 없습니다.</div>'}</div>
+    <div class="row" style="margin-top:18px"><button class="btn ghost sm" onclick="viewMyResults()">📊 내 성적 · 평균 보기</button></div>
+  </div>`;
+};
+window.viewLectures=function(g,sem){
+  curView='lectures';
+  stopTimer();
+  const all=loadLectures();
+  const grades=[...new Set(all.map(x=>x.grade).filter(Boolean))].sort();
+  let body;
+  if(!all.length){
+    body='<div class="empty">등록된 강의가 없습니다. 관리자(선생님)가 강의를 등록하면 여기서 볼 수 있어요.</div>';
+  }else if(!g){
+    body='<div class="banner">학년을 선택하세요.</div><div class="testlist">'+grades.map(x=>`<div class="testitem" onclick="viewLectures('${esc(x)}')"><div><h3>${esc(x)}</h3></div><span class="pill blue">학기 보기 →</span></div>`).join('')+'</div>';
+  }else if(!sem){
+    const sems=[...new Set(all.filter(x=>x.grade===g).map(x=>x.semester).filter(Boolean))].sort();
+    body=`<div class="banner">${esc(g)} — 학기를 선택하세요.</div><div class="row" style="margin-bottom:10px"><button class="btn ghost sm" onclick="viewLectures()">← 학년 다시 선택</button></div><div class="testlist">`+sems.map(x=>`<div class="testitem" onclick="viewLectures('${esc(g)}','${esc(x)}')"><div><h3>${esc(x)}</h3></div><span class="pill blue">과목 보기 →</span></div>`).join('')+'</div>';
+  }else{
+    const items=all.filter(x=>x.grade===g&&x.semester===sem);
+    const subs=[...new Set(items.map(x=>x.subject||'기타'))].sort();
+    const secs=subs.map(su=>{const li=items.filter(x=>(x.subject||'기타')===su).map(x=>`<div class="testitem"><div><h3>${esc(x.title)}</h3></div><a class="btn sm" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">▶ 강의 보기</a></div>`).join('');return `<h3 style="margin:14px 0 6px">${esc(su)}</h3><div class="testlist">${li}</div>`;}).join('');
+    body=`<div class="banner">${esc(g)} · ${esc(sem)}</div><div class="row" style="margin-bottom:10px"><button class="btn ghost sm" onclick="viewLectures('${esc(g)}')">← 학기 다시 선택</button></div>${secs||'<div class="empty">해당 학기의 강의가 없습니다.</div>'}`;
+  }
+  el.innerHTML=`<div class="card">
+    <div class="row between">
+      <div><h2>🎥 TestGuide 강의</h2>
+      <p class="sub" style="margin:4px 0 0">학년·학기·과목별로 강의를 선택하세요.</p></div>
+      <button class="btn ghost sm" onclick="viewHome()">🏠 메뉴</button>
+    </div>
+    ${body}
+  </div>`;
+};
 
 /* ============ TEST TAKING ============ */
 window.startTest=function(tid){
@@ -306,16 +359,47 @@ window.startTest=function(tid){
   tests=loadTests();
   curTest=tests.find(t=>t.id===tid);
   if(!curTest){alert('시험을 찾을 수 없습니다.');return;}
+  curMode=curTest.mode||'learning';
+  cfg=modeCfg(curTest);
   const prev=loadResults();
   const doneIdx=prev.findIndex(r=>r.testId===tid&&r.sid===student.id&&r.student===student.name);
   if(doneIdx>=0){
-    alert('이미 응시한 시험입니다. 답안은 한 번만 제출할 수 있어요.\n문제와 해설을 다시 확인합니다.');
+    alert('이미 응시한 시험입니다. 답안은 한 번만 제출할 수 있어요.\n재시험이 필요하면 관리자(선생님)에게 문의하세요. 관리자가 판단하여 재응시 여부를 결정합니다.\n지금은 문제와 해설을 다시 확인합니다.');
     renderResult(prev[doneIdx],doneIdx);
     return;
   }
+  if(cfg.guide){renderGuide(tid);return;}
+  startTestGo();
+};
+function renderGuide(tid){
+  const t=curTest, cf=cfg, m=curMode;
+  const rules=[];
+  if(cf.immediate){rules.push('문항마다 답을 <b>제출하면 바로 채점</b>됩니다.');}
+  if(cf.explain){rules.push('틀리거나 제한시간이 지나면 <b>해설·강의</b>를 보여드리며, <b>정답을 다시 입력</b>해야 합니다. 정답을 제출한 뒤 <b>“이해했어요”</b>를 눌러야 다음 단계로 진행됩니다.');}
+  if(cf.perQLimit){rules.push('문항별로 <b>제한시간</b>이 있을 수 있으며, 시간이 지나면 해당 문항이 처리됩니다.');}
+  if(cf.freeNav){rules.push('문항을 <b>자유롭게 오가며</b> 풀 수 있습니다.');}else if(cf.immediate){rules.push('문항은 <b>순서대로</b> 진행되며 이전 문항으로 돌아갈 수 없습니다.');}
+  if(cf.totalTime){rules.push('전체 제한시간 <b>'+t.minutes+'분</b>이 지나면 시험이 <b>자동 종료·제출</b>됩니다. 종료 <b>1분 전</b> 예고 안내가 표시됩니다.');}
+  if(cf.totalTime&&!cf.earlyClose){rules.push('전체 시간이 지나기 전에는 <b>조기에 종료할 수 없습니다.</b>');}
+  if(cf.earlyClose){rules.push('원하면 <b>먼저 제출</b>할 수 있습니다.');}
+  rules.push('성적은 <b>처음 선택·입력한 답안</b>을 기초로 작성됩니다.');
+  rules.push('답안은 <b>한 번만 제출</b>할 수 있습니다.');
+  el.innerHTML=`<div class="card">
+    <h2>📋 시험 안내</h2>
+    <p class="sub">${esc(t.title)} · ${t.questions.length}문항 · 제한시간 ${t.minutes}분 · <b style="color:var(--brand)">${modeLabel(m)}</b></p>
+    <div class="banner">아래 진행 방식을 읽고 숭지한 뒤 시작하세요.</div>
+    <ul style="line-height:1.9;padding-left:20px;margin:10px 0">${rules.map(r=>'<li>'+r+'</li>').join('')}</ul>
+    <label class="row" style="gap:8px;align-items:center;margin-top:8px;cursor:pointer"><input type="checkbox" id="ackchk" onchange="document.getElementById('startbtn').disabled=!this.checked"> <span>위 내용을 모두 숙지했습니다.</span></label>
+    <div class="row" style="margin-top:16px">
+      <button class="btn" id="startbtn" disabled onclick="startTestGo()">시험 시작 →</button>
+      <button class="btn ghost" onclick="viewHome()">취소</button>
+    </div>
+  </div>`;
+}
+window.startTestGo=function(){
   curIdx=0; answers=curTest.questions.map(q=>q.type==='short'?'':-1);
-  qRemain=curTest.questions.map(q=>{const l=+(q.limit||0);return l>0?l:0;});
+  qRemain=curTest.questions.map(q=>{const l=+(q.limit||0);return (cfg.perQLimit&&l>0)?l:0;});
   qLocked=curTest.questions.map(()=>false);
+  wrongList=[];
   timeLeft=curTest.minutes*60;
   reviewMode=false;
   renderQuestion();
@@ -328,23 +412,43 @@ function startGlobalTimer(){
     timeLeft--;
     const te=document.getElementById('tm');
     if(te){te.textContent=fmtTime(timeLeft);te.className='timer'+(timeLeft<=30?' warn':'');}
-    const q=curTest.questions[curIdx];
-    if((+q.limit||0)>0 && !qLocked[curIdx]){
-      qRemain[curIdx]--;
-      const qe=document.getElementById('qtm');
-      if(qe){qe.textContent='⏳ '+fmtTime(Math.max(0,qRemain[curIdx]));qe.className='timer'+(qRemain[curIdx]<=10?' warn':'');}
-      if(qRemain[curIdx]<=0){qLocked[curIdx]=true;onQTimeout();}
+    if(cfg&&cfg.totalTime){
+      const ew=document.getElementById('endwarn');
+      if(ew){
+        if(timeLeft<=60&&timeLeft>0){ew.style.display='block';ew.textContent='⚠️ 시험 종료까지 '+fmtTime(timeLeft)+' 남았습니다 — 시간이 지나면 자동으로 제출됩니다.';}
+        else{ew.style.display='none';}
+      }
     }
-    if(timeLeft<=0){stopTimer();submitTest();}
+    if(cfg&&cfg.perQLimit){
+      const q=curTest.questions[curIdx];
+      if((+q.limit||0)>0 && !qLocked[curIdx]){
+        qRemain[curIdx]--;
+        const qe=document.getElementById('qtm');
+        if(qe){qe.textContent='⏳ '+fmtTime(Math.max(0,qRemain[curIdx]));qe.className='timer'+(qRemain[curIdx]<=10?' warn':'');}
+        if(qRemain[curIdx]<=0){qLocked[curIdx]=true;if(cfg.immediate)submitAnswer(true);else onClassicTimeout();}
+      }
+    }
+    if(cfg&&cfg.totalTime&&timeLeft<=0){stopTimer();submitTest();}
   },1000);
 }
-function onQTimeout(){
-  const q=curTest.questions[curIdx];
-  if(!unanswered(q,answers[curIdx])){renderQuestion();return;}
-  reviewMode=true;
-  renderTimeoutReview();
+function onClassicTimeout(){
+  const qe=document.getElementById('qtm');
+  if(qe){qe.textContent='⏰ 시간 초과';qe.className='timer warn';}
+  renderQuestion();
 }
-function renderTimeoutReview(){
+window.submitAnswer=function(timedOut){
+  if(reviewMode)return;
+  const q=curTest.questions[curIdx];
+  if(!timedOut && unanswered(q,answers[curIdx])){alert('답을 입력(선택)한 뒤 제출하세요.');return;}
+  qLocked[curIdx]=true;
+  reviewMode=true;
+  const correct=!unanswered(q,answers[curIdx]) && isCorrect(q,answers[curIdx]);
+  if(!correct && wrongList.indexOf(curIdx)<0) wrongList.push(curIdx);
+  lastCorrect=correct; lastTimedOut=!!timedOut;
+  retryAns=(q.type==='short')?'':-1; retryOK=false;
+  renderFeedback();
+};
+function renderFeedback(){
   const q=curTest.questions[curIdx], total=curTest.questions.length;
   const isLast=curIdx===total-1;
   const content=q.img?`<img class="qimg" src="${q.img}" alt="문제">`:`<div class="qtext">${esc(q.q||'')}</div>`;
@@ -352,26 +456,69 @@ function renderTimeoutReview(){
   if(q.type==='short')ansLine=`<div class="short-ans">정답: <b>${esc(q.ansText||'')}</b></div>`;
   else if(q.opts){ansLine=`<div class="opts">${q.opts.map((o,j)=>`<div class="opt ${j===q.ans?'correct':''}"><span class="mk">${nlabel(j)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;}
   else ansLine=`<div style="margin-top:8px;font-size:14px;color:var(--muted)">정답: <b style="color:var(--ok)">${nlabel(q.ans)}</b></div>`;
+  let mine;
+  if(q.type==='short')mine=`<div style="font-size:13px;color:var(--muted);margin-top:4px">내 답: <b>${answers[curIdx]?esc(answers[curIdx]):'(미입력)'}</b></div>`;
+  else mine=`<div style="font-size:13px;color:var(--muted);margin-top:4px">내 답: <b>${answers[curIdx]>=0?nlabel(answers[curIdx]):'(미선택)'}</b></div>`;
+  if(lastCorrect){
+    el.innerHTML=`<div class="card">
+      <div class="banner" style="background:#e7f7ec;border-color:#b7e4c7;color:#1b7a43">✅ 정답입니다! 잘했어요. 다음 문제로 진행하세요.</div>
+      <div class="qnum">문항 ${curIdx+1} / ${total}</div>
+      ${content}
+      ${ansLine}
+      ${mine}
+      <div class="row" style="margin-top:18px">
+        <button class="btn" onclick="goNext()">${isLast?'✅ 시험 종료 · 최종 제출':'다음 문제로 →'}</button>
+      </div>
+    </div>`;
+    return;
+  }
   const expImg=q.explainImg?`<img class="expimg" src="${q.explainImg}" alt="해설">`:'';
   const expTxt=q.explain?`<div class="explain">💡 ${esc(q.explain)}</div>`:'';
   const hasExp=q.explain||q.explainImg;
+  if(!(cfg&&cfg.explain)){
+    const hd=lastTimedOut?'⏰ 제한시간이 지나 자동 채점되었어요.':'❌ 틀렸어요.';
+    el.innerHTML=`<div class="card"><div class="banner" style="background:#fdecec;border-color:#f5b7b1;color:#c0392b">${hd}</div><div class="qnum">문항 ${curIdx+1} / ${total}</div>${content}${ansLine}${mine}<div class="row" style="margin-top:18px"><button class="btn" onclick="goNext()">${isLast?'✅ 시험 종료 · 최종 제출':'다음 문제로 →'}</button></div></div>`;
+    return;
+  }
+  let retryBox;
+  if(retryOK){
+    retryBox=`<div class="banner" style="background:#e7f7ec;border-color:#b7e4c7;color:#1b7a43;margin-top:14px">👍 정답을 입력했어요! 이제 “이해했어요”를 누르면 다음 단계로 진행됩니다.</div>`;
+  }else{
+    let ri;
+    if(q.type==='short'){ri=`<input class="short-input" value="${esc(retryAns||'')}" oninput="setShortRetry(this.value)" placeholder="정답을 직접 입력" autocomplete="off">`;}
+    else if(q.opts){ri=`<div class="opts">${q.opts.map((o,i)=>`<div class="opt${retryAns===i?' sel':''}" onclick="pickRetry(${i})"><span class="mk">${nlabel(i)}</span><span>${esc(o)}</span></div>`).join('')}</div>`;}
+    else{const n=q.choices||5;ri=`<div class="ansgrid">${Array.from({length:n},(_,i)=>`<button class="ansbtn${retryAns===i?' sel':''}" onclick="pickRetry(${i})">${nlabel(i)}</button>`).join('')}</div>`;}
+    retryBox=`<div class="banner" style="margin-top:14px">✍️ 해설을 보고 <b>직접 정답을 입력</b>해 보세요. 정답을 맞춰야 다음으로 진행할 수 있습니다.</div>${ri}<div class="row" style="margin-top:8px"><button class="btn" onclick="checkRetry()">정답 확인</button></div>`;
+  }
   const lec=q.lecture?`<a class="lecture-link" href="${esc(q.lecture)}" target="_blank" rel="noopener noreferrer">🎥 관련 강의 보기 (새 창)</a>`:'';
   const noHelp=(!hasExp&&!q.lecture)?`<div class="explain">이 문항에는 등록된 해설/강의가 없습니다. 정답을 확인한 뒤 진행하세요.</div>`:'';
+  const head=lastTimedOut?'⏰ 제한시간이 지나 자동 채점되었어요.':'❌ 아쉬지만 틀렸어요.';
   el.innerHTML=`<div class="card">
-    <div class="banner" style="background:#fff4e5;border-color:#ffd8a8;color:#a15c00">⏰ 제한시간 안에 답을 입력하지 못했어요. 시험 시간은 잠시 멈추었습니다. 아래 해설${q.lecture?' 또는 강의':''}로 충분히 학습한 뒤 진행하세요.</div>
+    <div class="banner" style="background:#fdecec;border-color:#f5b7b1;color:#c0392b">${head} 시험 시간은 잠시 멈추었습니다. 아래 해설${q.lecture?' 또는 강의':''}로 충분히 학습한 뒤 진행하세요.</div>
     <div class="qnum">문항 ${curIdx+1} / ${total}</div>
     ${content}
     ${ansLine}
+    ${mine}
     ${expTxt}${expImg}${lec}${noHelp}
+    ${retryBox}
     <div class="banner" style="margin-top:18px">🤔 이 문항의 풀이·해설을 이해했나요?</div>
     <div class="row">
-      <button class="btn" onclick="ackUnderstood()">✅ 이해했어요 · ${isLast?'시험 종료':'다음 문제로'}</button>
+      <button class="btn" ${retryOK?'':'disabled'} onclick="ackUnderstood()">✅ 이해했어요 · ${isLast?'시험 종료':'다음 문제로'}</button>
       <button class="btn ghost" onclick="notUnderstood()">아직 잘 모르겠어요</button>
     </div>
   </div>`;
 }
-window.notUnderstood=function(){alert('해설과 강의를 다시 천천히 확인해 보세요. 충분히 이해했으면 “이해했어요”를 누르세요.');renderTimeoutReview();};
-window.ackUnderstood=function(){
+window.pickRetry=function(i){retryAns=i;renderFeedback();};
+window.setShortRetry=function(v){retryAns=v;};
+window.checkRetry=function(){
+  const q=curTest.questions[curIdx];
+  if(unanswered(q,retryAns)){alert('정답을 입력(선택)한 뒤 확인하세요.');return;}
+  if(isCorrect(q,retryAns)){retryOK=true;renderFeedback();}
+  else{alert('아직 정답이 아니에요. 해설을 다시 확인하고 정답을 입력해 보세요.');}
+};
+window.notUnderstood=function(){alert('해설과 강의를 다시 천천히 확인해 보세요. 충분히 이해했으면 “이해했어요”를 누르세요.');renderFeedback();};
+window.ackUnderstood=function(){goNext();};
+window.goNext=function(){
   const total=curTest.questions.length;
   reviewMode=false;
   if(curIdx>=total-1){stopTimer();submitTest();return;}
@@ -379,6 +526,7 @@ window.ackUnderstood=function(){
   renderQuestion();
 };
 function renderQuestion(){
+  reviewMode=false;
   const q=curTest.questions[curIdx], total=curTest.questions.length, L='ABCDE';
   const pct=((curIdx+1)/total*100).toFixed(0);
   const locked=qLocked[curIdx];
@@ -393,20 +541,42 @@ function renderQuestion(){
     opts=`<div style="font-size:13px;color:var(--muted);margin-bottom:6px">정답을 선택하세요</div><div class="ansgrid">${Array.from({length:n},(_,i)=>`<button class="ansbtn${answers[curIdx]===i?' sel':''}" ${locked?'disabled style="opacity:.55;cursor:not-allowed"':`onclick="pick(${i})"`}>${nlabel(i)}</button>`).join('')}</div>`;
   }
   const hasLimit=(+q.limit||0)>0;
-  const qtimer=hasLimit?`<span id="qtm" class="timer${qRemain[curIdx]<=10?' warn':''}" title="문항 제한시간" style="margin-right:8px">⏳ ${fmtTime(Math.max(0,qRemain[curIdx]))}</span>`:'';
+  const isImmediate=!!(cfg&&cfg.immediate);
+  const showQTimer=hasLimit && !!(cfg&&cfg.perQLimit);
+  const qtimer=showQTimer?`<span id="qtm" class="timer${qRemain[curIdx]<=10?' warn':''}" title="문항 제한시간" style="margin-right:8px">⏳ ${fmtTime(Math.max(0,qRemain[curIdx]))}</span>`:'';
   const lockNote=locked?`<div class="banner" style="background:#fdecec;color:#c0392b;border-color:#f5b7b1">⛔ 이 문항의 제한시간이 지나 답안 입력이 마감되었습니다.</div>`:'';
+  const endwarn=(cfg&&cfg.totalTime)?`<div id="endwarn" class="banner" style="display:none;background:#fdecec;color:#c0392b;border-color:#f5b7b1"></div>`:'';
+  let nav;
+  if(isImmediate){
+    nav=`<div class="navbtns" style="justify-content:flex-end">
+      <button class="btn" onclick="submitAnswer(false)">${curIdx===total-1?'제출하고 채점 (마지막 문항)':'제출하고 채점 →'}</button>
+    </div>`;
+  }else{
+    const canEarly=(cfg&&cfg.earlyClose)||!(cfg&&cfg.totalTime);
+    const freeNav=!!(cfg&&cfg.freeNav);
+    nav=`<div class="navbtns" style="justify-content:space-between">
+      <button class="btn ghost" onclick="prevQ()" ${(!freeNav||curIdx===0)?'disabled':''}>← 이전</button>
+      <span style="display:flex;gap:8px">
+        ${(freeNav&&curIdx<total-1)?'<button class="btn ghost" onclick="nextQ()">다음 →</button>':''}
+        ${canEarly?'<button class="btn" onclick="submitAll()">제출하기</button>':''}
+      </span>
+    </div>`;
+  }
   el.innerHTML=`<div class="card">
     <div class="qtop"><span class="qnum">문항 ${curIdx+1} / ${total}</span><span>${qtimer}<span id="tm" class="timer">${fmtTime(timeLeft)}</span></span></div>
     <div class="progress"><span style="width:${pct}%"></span></div>
+    ${endwarn}
     ${content}
     ${lockNote}
     ${opts}
-    <div class="navbtns">
-      <button class="btn ghost" onclick="prevQ()" ${curIdx===0?'disabled style="opacity:.4"':''}>← 이전</button>
-      ${curIdx===total-1?'<button class="btn" onclick="submitTest()">✅ 제출하기</button>':'<button class="btn" onclick="nextQ()">다음 →</button>'}
-    </div>
+    ${nav}
   </div>`;
 }
+window.submitAll=function(){
+  const un=curTest.questions.filter((q,i)=>unanswered(q,answers[i])).length;
+  const msg=un>0?`아직 답하지 않은 문항이 ${un}개 있습니다. 그래도 제출할까요?`:'답안을 제출할까요? 제출 후에는 수정할 수 없습니다.';
+  if(confirm(msg))submitTest();
+};
 window.pick=function(i){if(qLocked[curIdx])return;answers[curIdx]=i;renderQuestion();};
 window.prevQ=function(){if(curIdx>0){curIdx--;renderQuestion();}};
 window.nextQ=function(){if(curIdx<curTest.questions.length-1){curIdx++;renderQuestion();}};
@@ -427,15 +597,21 @@ function statsFor(testId){
 }
 window.submitTest=function(){
   stopTimer();
-  const qs=curTest.questions; let correct=0;
-  qs.forEach((q,i)=>{if(isCorrect(q,answers[i]))correct++;});
+  const qs=curTest.questions; let correct=0; const wrong=[];
+  qs.forEach((q,i)=>{if(isCorrect(q,answers[i]))correct++;else wrong.push(i+1);});
   const un=qs.filter((q,i)=>unanswered(q,answers[i])).length;
   const score=Math.round(correct/qs.length*100);
   const result={rid:newRid(),testId:curTest.id,testTitle:curTest.title,student:student.name,sid:student.id,
-    date:new Date().toLocaleString('ko-KR'),score,correct,total:qs.length,un,answers:answers.slice(),timeUsed:curTest.minutes*60-timeLeft};
+    date:new Date().toLocaleString('ko-KR'),score,correct,total:qs.length,un,wrong:wrong,answers:answers.slice(),timeUsed:curTest.minutes*60-timeLeft};
   const results=loadResults(); results.push(result); saveResults(results); cloudSaveResult(result);
   renderResult(result,results.length-1);
 };
+function wrongNums(r){
+  if(Array.isArray(r.wrong))return r.wrong;
+  const t=loadTests().find(x=>x.id===r.testId);
+  if(t&&Array.isArray(r.answers)){const w=[];t.questions.forEach((q,i)=>{if(!isCorrect(q,r.answers[i]))w.push(i+1);});return w;}
+  return null;
+}
 function renderResult(r,idx){
   const deg=r.score*3.6;
   const un=r.un!=null?r.un:r.answers.filter(a=>a<0).length;
@@ -450,6 +626,8 @@ function renderResult(r,idx){
     <div class="lbl"><span>평균 <b style="color:var(--warn)">${st.avg}점</b></span><span>최고 ${st.max}점</span></div>
     ${better!=null?`<div style="margin-top:8px;font-size:13px;color:var(--muted)">상위 <b style="color:var(--brand)">${100-better}%</b> · 나보다 낮은 점수 ${better}%</div>`:''}
   </div>`;
+  const wn=wrongNums(r);
+  const wrongLine=(wn&&wn.length)?`<div class="banner" style="background:#fff4e5;border-color:#ffd8a8;color:#a15c00;margin-top:6px">📌 틀린 문항 번호: <b>${wn.join(', ')}</b> · 해설·강의로 오답을 꿉 복습하세요.</div>`:`<div class="banner" style="background:#e7f7ec;border-color:#b7e4c7;color:#1b7a43;margin-top:6px">🎉 틀린 문항이 없습니다! 완벽해요.</div>`;
   el.innerHTML=`<div class="card">
     <h2>📊 시험 결과</h2>
     <p class="sub">${esc(r.testTitle)} · ${esc(r.date)}</p>
@@ -462,6 +640,8 @@ function renderResult(r,idx){
       <div class="box"><b>${fmtTime(r.timeUsed)}</b><small>소요시간</small></div>
     </div>
     ${cmp}
+    ${wrongLine}
+    <div style="font-size:12px;color:var(--muted);text-align:center;margin:6px 0 2px">ℹ️ 답안은 1회만 제출됩니다. 재시험이 필요하면 관리자(선생님)에게 문의하세요.</div>
     <div class="row" style="justify-content:center;gap:10px">
       <button class="btn" onclick="viewReview('${r.testId}',${idx})">📝 해설 · 강의 확인</button>
       <button class="btn ghost" onclick="viewMyResults()">📈 내 성적</button>
@@ -535,12 +715,14 @@ window.viewMyResults=function(){
     const idx=all.indexOf(r);
     const diff=r.score-st.avg;
     const dtxt=diff>0?`<span style="color:var(--ok)">+${diff}</span>`:diff<0?`<span style="color:var(--bad)">${diff}</span>`:'0';
+    const wn=wrongNums(r);const wtxt=(wn&&wn.length)?`<b style="color:var(--bad)">${wn.join(', ')}</b>`:'<span style="color:var(--ok)">없음</span>';
     return `<tr>
       <td>${esc(r.testTitle)}</td>
       <td style="text-align:center"><b style="color:${r.score>=70?'var(--ok)':'var(--bad)'}">${r.score}점</b></td>
       <td style="text-align:center">${st.avg}점</td>
       <td style="text-align:center">${dtxt}</td>
       <td style="text-align:center">${r.correct}/${r.total}</td>
+      <td style="text-align:center;font-size:12px">${wtxt}</td>
       <td style="text-align:center"><button class="btn ghost sm" onclick="viewReview('${r.testId}',${idx})">해설</button></td>
     </tr>`;
   }).join('');
@@ -548,7 +730,7 @@ window.viewMyResults=function(){
     <h2>📊 내 성적 · 평균</h2>
     <p class="sub">${esc(student.name)} (${esc(student.id)}) · ⏱ 세션 <b id="sessClock">${fmtDur(sessionElapsed())}</b> · 누적 <b id="cumClock">${fmtDur(cumulativeUsage(student))}</b></p>
     ${head}
-    ${mine.length?`<table><thead><tr><th style="text-align:left">시험</th><th>내점수</th><th>평균</th><th>편차</th><th>정답률</th><th>해설</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="empty">아직 응시 기록이 없어요.</div>'}
+    ${mine.length?`<table><thead><tr><th style="text-align:left">시험</th><th>내점수</th><th>평균</th><th>편차</th><th>정답률</th><th>틀린문항</th><th>해설</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="empty">아직 응시 기록이 없어요.</div>'}
     <div class="row" style="margin-top:18px">
       <button class="btn" onclick="showInfographic('me')">📊 성적 인포그래픽(PDF)</button>
       ${entryTestId?'<button class="btn ghost" onclick="logout()">마침하기</button>':'<button class="btn ghost" onclick="viewHome()">🏠 홈으로</button>'}
@@ -579,7 +761,7 @@ window.savePwSetup=function(){
   const a=document.getElementById('pw1').value,b=document.getElementById('pw2').value;
   if(!a||a.length<4){alert('암호는 4자 이상으로 입력하세요.');return;}
   if(a!==b){alert('암호가 일치하지 않습니다.');return;}
-  setPw(a);adminAuthed=true;adminTab='list';renderAdmin();
+  setPw(a);adminAuthed=true;setAdminSess(true);adminTab='list';renderAdmin();
 };
 function viewAdminLogin(){
   el.innerHTML=`<div class="card">
@@ -595,7 +777,7 @@ function viewAdminLogin(){
 }
 window.adminAuth=function(){
   const v=document.getElementById('pwin').value;
-  if(hashPw(v)===getPw()){adminAuthed=true;adminTab='list';renderAdmin();}
+  if(hashPw(v)===getPw()){adminAuthed=true;setAdminSess(true);adminTab='list';renderAdmin();}
   else alert('암호가 올바르지 않습니다.');
 };
 window.changePw=function(){
@@ -614,7 +796,7 @@ function renderAdmin(){
   let body='';
   if(adminTab==='list'){
     const list=tests.map(t=>`<div class="testitem">
-      <div style="flex:1"><h3>${esc(t.title)}</h3><div class="meta">${t.questions.length}문항 · ${t.minutes}분 · ${esc(t.subject)}</div>
+      <div style="flex:1"><h3>${esc(t.title)}</h3><div class="meta">${t.questions.length}문항 · ${t.minutes}분 · ${esc(t.subject)} · <span style="color:var(--brand);font-weight:600">${modeLabel(t.mode||'learning')}</span></div>
         <div class="linkbox"><span>🔗</span><input readonly value="${esc(buildLink(t.id))}" onclick="this.select()">
           <button class="btn sm" onclick="copyLink('${t.id}')">복사</button></div>
       </div>
@@ -645,13 +827,29 @@ function renderAdmin(){
       </div>
       <h3 style="margin:18px 0 6px">등록된 수강생 (${keys.length}명)</h3>
       <table><thead><tr><th style="text-align:left">이름</th><th style="text-align:left">학생 번호</th><th>암호</th><th>관리</th></tr></thead><tbody>${srows||'<tr><td colspan="4" style="text-align:center;color:var(--muted)">등록된 수강생이 없습니다.</td></tr>'}</tbody></table>`;
+  } else if(adminTab==='lectures'){
+    const L=loadLectures();
+    const rows=L.map((x,i)=>`<tr><td>${esc(x.grade||'')}</td><td>${esc(x.semester||'')}</td><td>${esc(x.subject||'')}</td><td>${esc(x.title||'')}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><a href="${esc(x.url||'')}" target="_blank" rel="noopener noreferrer">${esc(x.url||'')}</a></td><td style="text-align:center;white-space:nowrap"><button class="btn ghost sm" onclick="delLecture(${i})">🗑 삭제</button></td></tr>`).join('');
+    body=`<div class="banner">💡 학년·학기·과목과 강의 제목, 외부 강의 링크를 등록하세요. 학생은 ‘TestGuide 강의’에서 학년·학기·과목을 고른 뒤 링크를 새 탭으로 열어 시청합니다.</div>
+      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:90px"><label>학년</label><input id="lgrade" placeholder="예: 고1" autocomplete="off"></div>
+        <div style="flex:1;min-width:90px"><label>학기</label><input id="lsem" placeholder="예: 1학기" autocomplete="off"></div>
+        <div style="flex:1;min-width:90px"><label>과목</label><input id="lsub" placeholder="예: 수학" autocomplete="off"></div>
+      </div>
+      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:6px">
+        <div style="flex:2;min-width:140px"><label>강의 제목</label><input id="ltitle" placeholder="예: 이차함수 기초" autocomplete="off"></div>
+        <div style="flex:3;min-width:180px"><label>외부 강의 링크(URL)</label><input id="lurl" placeholder="https://..." autocomplete="off"></div>
+        <button class="btn" onclick="addLecture()">➕ 등록</button>
+      </div>
+      <h3 style="margin:18px 0 6px">등록된 강의 (${L.length}개)</h3>
+      <table><thead><tr><th style="text-align:left">학년</th><th style="text-align:left">학기</th><th style="text-align:left">과목</th><th style="text-align:left">제목</th><th style="text-align:left">링크</th><th>관리</th></tr></thead><tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--muted)">등록된 강의가 없습니다.</td></tr>'}</tbody></table>`;
   } else {
     const results=loadResults();
     const trash=getTrash();
     const byTest={};results.forEach(r=>{(byTest[r.testId]=byTest[r.testId]||[]).push(r);});
     const summary=Object.keys(byTest).map(tid=>{const st=statsFor(tid);const ti=byTest[tid][0].testTitle;
       return `<tr><td>${esc(ti)}</td><td style="text-align:center">${st.count}명</td><td style="text-align:center"><b>${st.avg}점</b></td><td style="text-align:center">${st.max}점</td><td style="text-align:center">${st.min}점</td></tr>`;}).join('');
-    const rows=results.slice().reverse().map((r,ri)=>{const oi=results.length-1-ri;return `<tr><td>${esc(r.student)} (${esc(r.sid)})</td><td>${esc(r.testTitle)}</td><td style="text-align:center"><b style="color:${r.score>=70?'var(--ok)':'var(--bad)'}">${r.score}점</b></td><td style="text-align:center">${r.correct}/${r.total}</td><td>${esc(r.date)}</td><td style="text-align:center"><button class="btn ghost sm" onclick="delResult(${oi})">🗑 삭제</button></td></tr>`;}).join('');
+    const rows=results.slice().reverse().map((r,ri)=>{const oi=results.length-1-ri;const wn=wrongNums(r);const wtxt=(wn&&wn.length)?`<b style="color:var(--bad)">${wn.join(', ')}</b>`:'<span style="color:var(--ok)">없음</span>';return `<tr><td>${esc(r.student)} (${esc(r.sid)})</td><td>${esc(r.testTitle)}</td><td style="text-align:center"><b style="color:${r.score>=70?'var(--ok)':'var(--bad)'}">${r.score}점</b></td><td style="text-align:center">${r.correct}/${r.total}</td><td style="text-align:center;font-size:12px">${wtxt}</td><td>${esc(r.date)}</td><td style="text-align:center"><button class="btn ghost sm" onclick="delResult(${oi})">🗑 삭제</button></td></tr>`;}).join('');
     const studs=adminStudents();
     const stuRows=studs.map((s,i)=>{const e=usageEntry(s.key);const live=(student&&usageKey(student)===s.key)?sessionElapsed():0;const sc=s.rs.map(r=>r.score);const av=sc.length?Math.round(sc.reduce((a,b)=>a+b,0)/sc.length):0;return `<tr><td style="text-align:center"><input type="checkbox" class="stusel" value="${i}"></td><td>${esc(s.name)} (${esc(s.sid)})</td><td style="text-align:center">${s.rs.length}</td><td style="text-align:center"><b>${av}점</b></td><td style="text-align:center">${fmtDur(e.sec+live)}</td><td style="text-align:center;white-space:nowrap"><button class="btn ghost sm" onclick="showInfographic('stu',${i})">📊 리포트</button><button class="btn ghost sm" onclick="delStudentData(${i})">🗑 삭제</button></td></tr>`;}).join('');
     const stuTrash=getStuTrash();
@@ -667,7 +865,7 @@ function renderAdmin(){
         <h3 style="margin:18px 0 6px">시험별 평균</h3>
         <table><thead><tr><th style="text-align:left">시험</th><th>응시</th><th>평균</th><th>최고</th><th>최저</th></tr></thead><tbody>${summary||'<tr><td colspan="5" style="text-align:center;color:var(--muted)">기록 없음</td></tr>'}</tbody></table>
         <div class="row between" style="margin:18px 0 6px;align-items:center"><h3 style="margin:0">전체 응시 기록 (${results.length}건)</h3>${results.length?'<button class="btn ghost sm" onclick="clearAllResults()">🗑 전체 삭제</button>':''}</div>
-        <table><thead><tr><th style="text-align:left">학생</th><th style="text-align:left">시험</th><th>점수</th><th>정답률</th><th>응시일</th><th>관리</th></tr></thead><tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--muted)">응시 기록이 없습니다.</td></tr>'}</tbody></table>
+        <table><thead><tr><th style="text-align:left">학생</th><th style="text-align:left">시험</th><th>점수</th><th>정답률</th><th>틀린문항</th><th>응시일</th><th>관리</th></tr></thead><tbody>${rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted)">응시 기록이 없습니다.</td></tr>'}</tbody></table>
         <div class="row between" style="margin:18px 0 6px;align-items:center"><h3 style="margin:0">🗑 휴지통 (${trash.length}건)</h3>${trash.length?'<span class="row" style="gap:6px"><button class="btn ghost sm" onclick="restoreAll()">↩ 전체 복구</button><button class="btn ghost sm" onclick="emptyTrash()">비우기</button></span>':''}</div>
         <table><thead><tr><th style="text-align:left">학생</th><th style="text-align:left">시험</th><th>점수</th><th>삭제일</th><th>관리</th></tr></thead><tbody>${trashRows||'<tr><td colspan="5" style="text-align:center;color:var(--muted)">휴지통이 비어 있습니다.</td></tr>'}</tbody></table>
         <div class="row between" style="margin:18px 0 6px;align-items:center"><h3 style="margin:0">👥 삭제된 학생 기록 (${stuTrash.length}명)</h3>${stuTrash.length?'<span class="row" style="gap:6px"><button class="btn ghost sm" onclick="restoreAllStudentData()">↩ 전체 복구</button><button class="btn ghost sm" onclick="emptyStuTrash()">비우기</button></span>':''}</div>
@@ -677,13 +875,14 @@ function renderAdmin(){
     <div class="row between"><h2>👨‍🏫 강사 관리</h2><button class="btn ghost sm" onclick="backToStudent()">← 학생 모드</button></div>
     <div class="tabs">
       <span class="tab ${adminTab==='list'?'active':''}" onclick="adminTab='list';renderAdmin()">📋 시험/링크 관리</span>
+      <span class="tab ${adminTab==='lectures'?'active':''}" onclick="adminTab='lectures';renderAdmin()">🎥 강의 관리</span>
       <span class="tab ${adminTab==='students'?'active':''}" onclick="adminTab='students';renderAdmin()">👥 수강생 관리</span>
       <span class="tab ${adminTab==='results'?'active':''}" onclick="adminTab='results';renderAdmin()">📊 성적 · 평균</span>
     </div>${body}
   </div>`;
 }
 window.renderAdmin=renderAdmin;
-window.backToStudent=function(){entryTestId=null;adminAuthed=false;viewLogin();};
+window.backToStudent=function(){entryTestId=null;adminAuthed=false;setAdminSess(false);viewLogin();};
 window.addStudent=function(){const n=document.getElementById('newnm').value.trim(),i=document.getElementById('newsid').value.trim();if(!n||!i){alert('이름과 학생 번호를 모두 입력하세요.');return;}const m=getStudents();if(m[i]){alert('이미 등록된 학생 번호입니다.');return;}m[i]={sid:i,name:n,pw:''};saveStudents(m);cloudSaveStudent(m[i]);renderAdmin();};
 window.delStudent=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;if(!confirm('이 수강생을 삭제할까요? 기존 성적 기록은 유지됩니다.'))return;const m=getStudents();delete m[sid];saveStudents(m);cloudDelStudent(sid);renderAdmin();};
 window.resetStuPw=function(idx){const keys=Object.keys(getStudents()).sort();const sid=keys[idx];if(sid==null)return;if(!confirm('암호를 초기화하면 학생이 다음 로그인 시 새 개인 암호를 다시 설정합니다. 진행할까요?'))return;const m=getStudents();m[sid].pw='';saveStudents(m);cloudSaveStudent(m[sid]);alert('암호가 초기화되었습니다.');renderAdmin();};
@@ -861,9 +1060,41 @@ window.applyWhole=function(){assignCrop(wholeToDataURL());};
 window.closeCrop=function(){window.onmousemove=null;window.onmouseup=null;document.getElementById('cropRoot').innerHTML='';};
 
 /* ============ EDIT / CRUD (이미지 기반) ============ */
+function modeLabel(m){return m==='timed'?'시간형(자동제출)':(m==='classic'?'기본형':(m==='custom'?'선택형':'학습형'));}
+function modeCfg(t){
+  const m=(t&&t.mode)||'learning';
+  if(m==='learning')return{immediate:true,explain:true,totalTime:false,perQLimit:true,freeNav:false,earlyClose:false,guide:true};
+  if(m==='timed')return{immediate:false,explain:false,totalTime:true,perQLimit:false,freeNav:true,earlyClose:false,guide:true};
+  if(m==='classic')return{immediate:false,explain:false,totalTime:true,perQLimit:true,freeNav:true,earlyClose:true,guide:false};
+  const c=(t&&t.custom)||{};
+  return{immediate:!!c.immediate,explain:!!c.explain,totalTime:!!c.totalTime,perQLimit:!!c.perQLimit,freeNav:!!c.freeNav,earlyClose:!!c.earlyClose,guide:true};
+}
+function customToggles(){
+  const c=editData.custom||{};
+  const rows=[['immediate','문항별 즉시 채점 (제출하면 바로 정오답 표시)'],['explain','오답 시 해설·강의 표시 후 정답 재입력·이해 확인'],['perQLimit','문항별 제한시간 사용'],['totalTime','전체 제한시간 자동 제출 (종료 1분 전 예고)'],['freeNav','문항 자유 이동(이전/다음)'],['earlyClose','학생 조기 제출 허용']];
+  return '<div class="banner" style="font-size:12px">원하는 요소를 켜세요. (예: 즉시 채점+해설 생략+전체 시간 제한 등 자유 조합)</div>'+rows.map(function(r){return '<label class="row" style="gap:8px;align-items:center;cursor:pointer;margin:4px 0"><input type="checkbox" '+(c[r[0]]?'checked':'')+' onchange="setCustom(\''+r[0]+'\',this.checked)"> <span>'+r[1]+'</span></label>';}).join('');
+}
+window.setCustom=function(k,v){editData.custom=editData.custom||{};editData.custom[k]=v;};
 function blankQ(){return{img:'',type:'choice',choices:5,ans:0,ansText:'',explain:'',explainImg:'',lecture:'',limit:0};}
-window.newTest=function(){editData={id:'t'+Date.now(),title:'',subject:'',minutes:10,questions:[blankQ()]};adminTab='edit';renderAdmin();};
-window.editTest=function(tid){editData=JSON.parse(JSON.stringify(loadTests().find(t=>t.id===tid)));editData.questions.forEach(q=>{if(q.explain==null)q.explain='';if(q.lecture==null)q.lecture='';if(q.explainImg==null)q.explainImg='';if(q.img==null)q.img='';if(q.ansText==null)q.ansText='';if(q.limit==null)q.limit=0;if(!q.type)q.type=q.opts?'choice':'choice';if(q.type==='choice'&&!q.choices&&!q.opts)q.choices=5;});adminTab='edit';renderAdmin();};
+window.newTest=function(){editData={id:'t'+Date.now(),title:'',subject:'',minutes:10,mode:'learning',questions:[blankQ()]};adminTab='edit';renderAdmin();};
+window.addLecture=function(){
+  const g=document.getElementById('lgrade').value.trim();
+  const s=document.getElementById('lsem').value.trim();
+  const su=document.getElementById('lsub').value.trim();
+  const ti=document.getElementById('ltitle').value.trim();
+  let u=document.getElementById('lurl').value.trim();
+  if(!g||!s||!su||!ti||!u){alert('학년·학기·과목·제목·링크를 모두 입력하세요.');return;}
+  if(!/^https?:\/\//i.test(u))u='https://'+u;
+  const L=loadLectures();
+  L.push({id:'l'+Date.now(),grade:g,semester:s,subject:su,title:ti,url:u});
+  saveLectures(L); renderAdmin();
+};
+window.delLecture=function(i){
+  const L=loadLectures();
+  if(i<0||i>=L.length)return;
+  if(!confirm('이 강의를 삭제할까요?'))return;
+  L.splice(i,1); saveLectures(L); renderAdmin();
+};window.editTest=function(tid){editData=JSON.parse(JSON.stringify(loadTests().find(t=>t.id===tid)));if(!editData.mode)editData.mode='learning';editData.questions.forEach(q=>{if(q.explain==null)q.explain='';if(q.lecture==null)q.lecture='';if(q.explainImg==null)q.explainImg='';if(q.img==null)q.img='';if(q.ansText==null)q.ansText='';if(q.limit==null)q.limit=0;if(!q.type)q.type=q.opts?'choice':'choice';if(q.type==='choice'&&!q.choices&&!q.opts)q.choices=5;});adminTab='edit';renderAdmin();};
 window.delTest=function(tid){if(!confirm('이 시험을 삭제하시겠습니까?'))return;saveTests(loadTests().filter(t=>t.id!==tid));renderAdmin();};
 function renderEdit(){
   if(!editData)return;
@@ -901,6 +1132,15 @@ function renderEdit(){
     <label>시험 제목</label><input value="${esc(editData.title)}" oninput="editData.title=this.value">
     <label>과목</label><input value="${esc(editData.subject)}" oninput="editData.subject=this.value">
     <label>제한 시간(분)</label><input type="number" min="1" value="${editData.minutes}" oninput="editData.minutes=+this.value">
+    <label>시험 방식</label>
+    <select onchange="editData.mode=this.value;renderEdit()" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">
+      <option value="learning" ${editData.mode==='learning'?'selected':''}>학습형 — 문항별 제출·즉시 채점, 오답시 해설·강의 후 정답재입력·이해확인</option>
+      <option value="classic" ${editData.mode==='classic'?'selected':''}>기본형 — 문항 자유 이동 + 문항별 제한시간 + 최종 제출</option>
+      <option value="timed" ${editData.mode==='timed'?'selected':''}>시간형 — 자유 이동·총 시험시간 자동 제출(종료 1분 전 예고, 조기종료 불가)</option>
+      <option value="custom" ${editData.mode==='custom'?'selected':''}>선택형 — 관리자가 요소를 직접 조합</option>
+    </select>
+    <div class="banner" style="font-size:12px">${editData.mode==='timed'?'⏱️ 시간형은 위 <b>제한 시간(분)</b>이 전체 시험 시간이며, 문항을 자유롭게 오갈 수 있습니다. 종료 1분 전 예고가 뜨고, 전체 시간이 지나면 자동 제출되며 조기 종료는 할 수 없습니다.':(editData.mode==='classic'?'🗂️ 기본형은 문항을 자유롭게 오가며 풀고, 문항별 제한시간이 지나면 해당 문항이 잠깁니다.':(editData.mode==='custom'?'🧩 선택형은 아래 요소를 자유롭게 조합해 시험을 구성합니다.':'🎓 학습형은 문항마다 제출·채점하며 틀리거나 시간 초과 시 해설·강의를 보여준 뒤 정답을 다시 입력하고 이해해야 다음으로 진행합니다.'))}</div>
+    ${editData.mode==='custom'?customToggles():''}
     <h2 style="margin-top:22px">문항 목록</h2>${qs}
     <button class="btn ghost" style="margin-top:10px" onclick="addQ()">➕ 문항 추가</button>
     <div class="row" style="margin-top:20px"><button class="btn" onclick="saveEdit()">💾 저장</button><button class="btn ghost" onclick="adminTab='list';renderAdmin()">취소</button></div>
@@ -916,7 +1156,7 @@ window.setQLimit=function(i,unit,val){
 };
 window.rmQ=function(i){if(editData.questions.length<=1){alert('최소 1문항 필요');return;}editData.questions.splice(i,1);renderEdit();};
 window.saveEdit=function(){
-  const t=editData; t.title=(t.title||'').trim(); t.subject=(t.subject||'').trim();
+  const t=editData; t.title=(t.title||'').trim(); t.subject=(t.subject||'').trim(); if(!t.mode)t.mode='learning';
   if(!t.title){alert('시험 제목을 입력하세요.');return;}
   for(let k=0;k<t.questions.length;k++){const q=t.questions[k];
     if(q.opts){if(!q.q||!q.q.trim()){alert(`${k+1}번 문제가 비어있어요.`);return;}}
@@ -944,7 +1184,7 @@ function studentBlock(s){
   const best=scores.length?Math.max(...scores):0, worst=scores.length?Math.min(...scores):0;
   const byTest={};rs.forEach(r=>{byTest[r.testId]=r;});
   const bars=Object.keys(byTest).map(tid=>{const r=byTest[tid];const st=statsFor(tid);return `<div class="grouphd">${esc(r.testTitle)}</div><div class="bc">${infoBar('학생 점수',r.score,'var(--brand)')}${infoBar('학급 평균',st.avg,'var(--warn)')}</div>`;}).join('');
-  const examRows=rs.slice().reverse().map(r=>`<tr><td>${esc(r.testTitle)}</td><td style="text-align:center"><b style="color:${r.score>=70?'var(--ok)':'var(--bad)'}">${r.score}점</b></td><td style="text-align:center">${r.correct}/${r.total}</td><td style="text-align:center">${fmtTime(r.timeUsed||0)}</td><td style="font-size:12px">${esc(r.date)}</td></tr>`).join('');
+  const examRows=rs.slice().reverse().map(r=>{const wn=wrongNums(r);const wtxt=(wn&&wn.length)?`<b style="color:var(--bad)">${wn.join(', ')}</b>`:'<span style="color:var(--ok)">없음</span>';return `<tr><td>${esc(r.testTitle)}</td><td style="text-align:center"><b style="color:${r.score>=70?'var(--ok)':'var(--bad)'}">${r.score}점</b></td><td style="text-align:center">${r.correct}/${r.total}</td><td style="text-align:center;font-size:12px">${wtxt}</td><td style="text-align:center">${fmtTime(r.timeUsed||0)}</td><td style="font-size:12px">${esc(r.date)}</td></tr>`;}).join('');
   const logRows=entry.log.slice().reverse().map(l=>`<tr><td style="font-size:12px">${esc(l.d)}</td><td style="text-align:right">${fmtDur(l.sec)}</td></tr>`).join('');
   const liveRow=live?`<tr><td style="font-size:12px;color:var(--brand)">현재 접속 세션</td><td style="text-align:right;color:var(--brand)">${fmtDur(live)}</td></tr>`:'';
   return `<div style="border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:14px;margin:14px 0;background:rgba(0,0,0,.015)">
@@ -958,7 +1198,7 @@ function studentBlock(s){
     </div>
     <div style="font-size:12px;color:var(--muted);margin:6px 0 4px">최초 사용: ${esc(entry.first||'-')} · 최근 사용: ${esc(entry.last||'-')}${live?' · <b style="color:var(--brand)">현재 접속 중</b>':''}</div>
     ${bars?`<div class="sectitle">📈 시험별 점수 vs 학급 평균</div>${bars}`:''}
-    ${rs.length?`<div class="sectitle">📅 응시 이력</div><table><thead><tr><th style="text-align:left">시험</th><th>점수</th><th>정답률</th><th>소요</th><th style="text-align:left">응시일시</th></tr></thead><tbody>${examRows}</tbody></table>`:''}
+    ${rs.length?`<div class="sectitle">📅 응시 이력</div><table><thead><tr><th style="text-align:left">시험</th><th>점수</th><th>정답률</th><th>틀린문항</th><th>소요</th><th style="text-align:left">응시일시</th></tr></thead><tbody>${examRows}</tbody></table>`:''}
     <div class="sectitle">⏱ 이용시간 상세 (세션별 사용일시)</div>
     ${(logRows||liveRow)?`<table><thead><tr><th style="text-align:left">사용일시</th><th style="text-align:right">이용시간</th></tr></thead><tbody>${liveRow}${logRows}</tbody></table>`:'<div style="font-size:13px;color:var(--muted)">기록된 세션 이용시간이 없습니다.</div>'}
   </div>`;
@@ -1047,7 +1287,8 @@ window.__bootApp=function(){
     const t=getParam('test');
     if(t&&loadTests().find(x=>x.id===t)&&!student){entryTestId=t;viewLogin();}
   });
-  viewLogin();
+  if(!entryTestId&&hasAdminSess()&&getPw()){adminAuthed=true;viewAdmin();}
+  else viewLogin();
 };
 
 window.__cloudReady=async function(fs){
@@ -1057,6 +1298,9 @@ window.__cloudReady=async function(fs){
     const tSnap=await getDoc(doc(db,'config','tests'));
     if(tSnap.exists()&&tSnap.data().data){localStorage.setItem(LS_TESTS,JSON.stringify(tSnap.data().data));}
     else{cloudSaveTests(loadTests());}
+    const lSnap=await getDoc(doc(db,'config','lectures'));
+    if(lSnap.exists()&&lSnap.data().data){localStorage.setItem(LS_LECTURES,JSON.stringify(lSnap.data().data));}
+    else{cloudSaveLectures(loadLectures());}
     const sSnap=await getDocs(collection(db,'students'));
     if(!sSnap.empty){const m={};sSnap.forEach(d=>{const v=d.data();if(v.sid)m[v.sid]=v;});localStorage.setItem(LS_STUDENTS,JSON.stringify(m));}
     else{const loc=getStudents();Object.keys(loc).forEach(k=>cloudSaveStudent(loc[k]));}
@@ -1069,6 +1313,7 @@ window.__cloudReady=async function(fs){
   }catch(e){console.warn('cloud init',e);cloudOn=false;}
   try{
     onSnapshot(doc(db,'config','tests'),d=>{if(d.exists()&&d.data().data)applyTestsSnap(d.data().data);});
+    onSnapshot(doc(db,'config','lectures'),d=>{if(d.exists()&&d.data().data)applyLecturesSnap(d.data().data);});
     onSnapshot(collection(db,'students'),qs=>{const m={};qs.forEach(d=>{const v=d.data();if(v.sid)m[v.sid]=v;});applyStudentsSnap(m);});
     onSnapshot(collection(db,'results'),qs=>{const arr=[];qs.forEach(d=>arr.push(d.data()));arr.sort((a,b)=>(a.date||'').localeCompare(b.date||''));applyResultsSnap(arr);});
     onSnapshot(collection(db,'usage'),qs=>{const m={};qs.forEach(d=>{const v=d.data();if(v.key)m[v.key]=v.entry;});applyUsageSnap(m);});
